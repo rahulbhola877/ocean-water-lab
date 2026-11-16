@@ -62,6 +62,19 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 **Sound**
 - Procedural ocean, wash, wind, rain, thunder, engine, cannons and splashes. Turn it on with *Sound*.
 
+## Water Lite: for low-end and stylized games
+
+[`lite/`](lite/) is a second, separate engine for browser games that have to run on weak hardware or want a particular art style. It is one JavaScript file on WebGL 1 with no dependencies.
+
+- **Three views:** a 3D ocean, a 2D side view and a 2D top-down view.
+- **Six art styles:** realistic, toon, pixel art, low poly, retro and ink.
+- **Pixel art in whole pixels**, with retro palettes and clean ordered dithering.
+- **The same physics in every style:** things float, boats leave wakes, and ripples bounce off coasts.
+
+![Water Lite in three views and six art styles](media/lite-grid.jpg)
+
+See [lite/README.md](lite/README.md) for the API and options.
+
 ## Using it in an engine
 
 The engine-facing code is in [`kit/`](kit/README.md):
@@ -96,6 +109,7 @@ demo/src/        page template, the lab (main.js) and every parameter and scene 
 demo/shaders/    sky, clouds, terrain, objects, particles, post
 demo/dist/       the built single-file demo
 kit/             engine-facing shaders and physics (see kit/README.md)
+lite/            Water Lite: water-lite.js, its demo and build (see lite/README.md)
 tools/           screenshot and smoke-test scripts, HLSL generator
 media/           screenshots
 ```

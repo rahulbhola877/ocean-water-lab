@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Water Lite: stylized water for low-end games</title>
+<style>
+:root {
+  /* a light, game-tool panel: the water is the colourful part */
+  --ink: #16202e; --muted: #5d6b7c; --line: #d6dde6; --panel: rgba(250, 251, 252, 0.92); --accent: #1f6feb; --accent-ink: #ffffff;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: #2a3442 repeating-conic-gradient(#323d4c 0 25%, #2a3442 0 50%) 0 0 / 32px 32px; font-family: var(--sans); color: var(--ink); }
+#water { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; image-rendering: pixelated; }
+.panel {
+  position: absolute; top: 12px; left: 12px; width: 312px; max-height: calc(100% - 24px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 14px 12px;
+  box-shadow: 0 8px 28px rgba(6, 16, 30, 0.25); display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin;
+}
+h1 { margin: 0; font-size: 17px; letter-spacing: 0.02em; }
+h1 span { color: var(--muted); font-weight: 500; font-size: 13px; display: block; margin-top: 2px; letter-spacing: 0; }
+h2 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; }
+.seg button + button { border-left: 1px solid var(--line); }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+button {
+  font: 600 12.5px var(--sans); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 9px; cursor: pointer; transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+button:hover { border-color: #aab6c4; }
+button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: grid; grid-template-columns: 92px 1fr 52px; align-items: center; gap: 8px; font-size: 13px; }
+.row output { font: 12px var(--mono); color: var(--muted); text-align: right; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+.colors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; font-size: 11px; color: var(--muted); }
+.colors label { display: flex; flex-direction: column; gap: 3px; }
+input[type="color"] { width: 100%; height: 26px; border: 1px solid var(--line); border-radius: 5px; padding: 1px; background: #fff; }
+.hud { position: absolute; right: 12px; bottom: 12px; padding: 7px 11px; border-radius: 8px; background: rgba(8, 16, 28, 0.72); color: #dfe8f2; font: 12px var(--mono); pointer-events: none; }
+.hint { position: absolute; right: 12px; top: 12px; max-width: 300px; padding: 8px 11px; border-radius: 8px; background: rgba(8, 16, 28, 0.72); color: #dfe8f2; font-size: 13px; line-height: 1.4; pointer-events: none; }
+textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px solid var(--line); border-radius: 6px; padding: 6px; resize: vertical; color: var(--ink); }
+.note { font-size: 12px; color: var(--muted); line-height: 1.4; margin: 0; }
+.err { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; padding: 24px; text-align: center; }
+@media (max-width: 700px) {
+  .panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 48%; border-radius: 12px 12px 0 0; }
+  .hint { left: 12px; right: 12px; max-width: none; }
+  .hud { bottom: auto; top: 64px; }
+}
+</style>
+</head>
+<body>
+<canvas id="water" tabindex="0" aria-label="Water simulation. Click to splash or drop things."></canvas>
+
+<div class="panel" role="region" aria-label="Water Lite settings">
+  <h1>Water Lite <span>Stylized water for low-end browser games</span></h1>
+  <div>
+    <h2>View</h2>
+    <div class="seg" id="modes">
+      <button type="button" data-mode="3d">3D ocean</button>
+      <button type="button" data-mode="side">Side view</button>
+      <button type="button" data-mode="top">Top down</button>
+    </div>
+  </div>
+  <div>
+    <h2>Art style</h2>
+    <div class="chips" id="styles">
+      <button type="button" data-style="realistic">Realistic</button>
+      <button type="button" data-style="toon">Toon</button>
+      <button type="button" data-style="pixel">Pixel art</button>
+      <button type="button" data-style="lowpoly">Low poly</button>
+      <button type="button" data-style="retro">Retro 32-bit</button>
+      <button type="button" data-style="ink">Ink</button>
+    </div>
+  </div>
+  <div>
+    <h2>Palette</h2>
+    <div class="chips" id="palettes">
+      <button type="button" data-palette="auto">Style default</button>
+      <button type="button" data-palette="none">Full colour</button>
+      <button type="button" data-palette="pico8">PICO-8</button>
+      <button type="button" data-palette="sweetie16">Sweetie 16</button>
+      <button type="button" data-palette="gameboy">Game Boy</button>
+      <button type="button" data-palette="ocean8">Ocean 8</button>
+      <button type="button" data-palette="mono">1-bit</button>
+    </div>
+  </div>
+  <div>
+    <h2>Performance</h2>
+    <div class="seg" id="qualities">
+      <button type="button" data-quality="potato">Potato</button>
+      <button type="button" data-quality="low">Low</button>
+      <button type="button" data-quality="medium">Medium</button>
+      <button type="button" data-quality="high">High</button>
+    </div>
+  </div>
+  <div>
+    <h2>Look and motion</h2>
+    <div class="row"><label for="pixelSize">Pixel size</label><input id="pixelSize" type="range" min="0" max="10" step="1"><output id="o-pixelSize"></output></div>
+    <div class="row"><label for="dither">Dither</label><input id="dither" type="range" min="-0.05" max="1" step="0.05"><output id="o-dither"></output></div>
+    <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="1" max="20" step="0.5"><output id="o-wind"></output></div>
+    <div class="row"><label for="waveHeight">Wave height</label><input id="waveHeight" type="range" min="0.1" max="2.5" step="0.05"><output id="o-waveHeight"></output></div>
+    <div class="row"><label for="choppiness">Choppiness</label><input id="choppiness" type="range" min="0" max="1" step="0.05"><output id="o-choppiness"></output></div>
+    <div class="row"><label for="foam">Foam</label><input id="foam" type="range" min="0" max="2" step="0.05"><output id="o-foam"></output></div>
+    <div class="row"><label for="sunElevation">Sun height</label><input id="sunElevation" type="range" min="3" max="80" step="1"><output id="o-sunElevation"></output></div>
+  </div>
+  <div>
+    <h2>Scene</h2>
+    <div class="chips" id="toggles">
+      <button type="button" data-toggle="scenery">Scenery</button>
+      <button type="button" data-toggle="boat">Boat</button>
+      <button type="button" data-toggle="floaters">Floating things</button>
+      <button type="button" id="new-map">New map</button>
+    </div>
+    <p class="note" style="margin-top:6px">Turn scenery off to keep only the water, so your own background or tiles show through.</p>
+  </div>
+  <div>
+    <h2>Colours</h2>
+    <div class="colors">
+      <label>Deep<input type="color" data-color="deep"></label>
+      <label>Shallow<input type="color" data-color="shallow"></label>
+      <label>Foam<input type="color" data-color="foam"></label>
+      <label>Sky<input type="color" data-color="skyTop"></label>
+      <label>Sand<input type="color" data-color="sand"></label>
+      <label>Ink<input type="color" data-color="ink"></label>
+    </div>
+    <div class="chips" style="margin-top:6px"><button type="button" id="reset-colors">Reset colours</button></div>
+  </div>
+  <div>
+    <h2>Use it in your game</h2>
+    <textarea id="config" readonly spellcheck="false" aria-label="Code that creates this water in your game"></textarea>
+    <div class="chips" style="margin-top:6px"><button type="button" id="copy">Copy code</button></div>
+    <p class="note">One JavaScript file (<code>water-lite.js</code>), WebGL 1, no dependencies. Call <code>water.update(dt)</code> and <code>water.render()</code> every frame.</p>
+  </div>
+</div>
+
+<p class="hint" id="hint"></p>
+<div class="hud" id="hud">-- fps</div>
+<div class="err" id="err"></div>
+
+<script src="water-lite.js"></script>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('water'), water;
+  try { water = new WaterLite(canvas, { mode: 'side', style: 'pixel', quality: 'low', transparent: true }); }
+  catch (e) { var er = document.getElementById('err'); er.style.display = 'flex'; er.textContent = 'This device cannot run WebGL: ' + e.message; return; }
+  window.waterLite = water;
+  var HINTS = {
+    '3d': 'Drag to look around · scroll to zoom · click the sea to drop a crate',
+    side: 'Click to drop crates, barrels and ducks · drag across the water to make waves',
+    top: 'WASD or arrows to sail the boat · click to make ripples'
+  };
+  function $(id) { return document.getElementById(id); }
+  var SLIDERS = ['pixelSize', 'dither', 'wind', 'waveHeight', 'choppiness', 'foam', 'sunElevation'];
+  var FMT = { pixelSize: function (v) { return v === 0 ? 'style' : v + ' px'; }, dither: function (v) { return v < 0 ? 'style' : v.toFixed(2); },
+    wind: function (v) { return v.toFixed(1) + ' m/s'; }, waveHeight: function (v) { return v.toFixed(2) + '×'; }, choppiness: function (v) { return v.toFixed(2); },
+    foam: function (v) { return v.toFixed(2) + '×'; }, sunElevation: function (v) { return Math.round(v) + '°'; } };
+  function sync() {
+    var o = water.opts;
+    document.querySelectorAll('[data-mode]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.mode === o.mode)); });
+    document.querySelectorAll('[data-style]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.style === o.style)); });
+    document.querySelectorAll('[data-palette]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.palette === o.palette)); });
+    document.querySelectorAll('[data-quality]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.quality === o.quality)); });
+    document.querySelectorAll('[data-toggle]').forEach(function (b) { b.setAttribute('aria-pressed', String(!!o[b.dataset.toggle])); });
+    $('new-map').style.display = o.mode === 'top' ? '' : 'none';
+    SLIDERS.forEach(function (k) { var el = $(k); if (document.activeElement !== el) el.value = o[k]; $('o-' + k).textContent = FMT[k](+o[k]); });
+    var th = WaterLite.THEMES[o.style], cc = o.colors || {};
+    document.querySelectorAll('[data-color]').forEach(function (inp) { inp.value = cc[inp.dataset.color] || th[inp.dataset.color]; });
+    $('hint').textContent = HINTS[o.mode];
+    var cfg = water.config(), D = WaterLite.DEFAULTS, out = { mode: cfg.mode, style: cfg.style };
+    Object.keys(cfg).forEach(function (k) { if (JSON.stringify(cfg[k]) !== JSON.stringify(D[k])) out[k] = cfg[k]; });
+    $('config').value = 'var water = new WaterLite(canvas, ' + JSON.stringify(out, null, 2) + ');\n\n' +
+      'function frame(now) {\n  water.update(dt);   // seconds since the last frame\n  water.render();\n}';
+  }
+  document.querySelectorAll('[data-mode]').forEach(function (b) { b.onclick = function () { water.setOptions({ mode: b.dataset.mode }); sync(); }; });
+  document.querySelectorAll('[data-style]').forEach(function (b) { b.onclick = function () { water.setOptions({ style: b.dataset.style, colors: null, pixelSize: 0, dither: -1, palette: 'auto' }); sync(); }; });
+  document.querySelectorAll('[data-palette]').forEach(function (b) { b.onclick = function () { water.setOptions({ palette: b.dataset.palette }); sync(); }; });
+  document.querySelectorAll('[data-quality]').forEach(function (b) { b.onclick = function () { water.setOptions({ quality: b.dataset.quality }); sync(); }; });
+  SLIDERS.forEach(function (k) { $(k).oninput = function () { var o = {}; o[k] = parseFloat($(k).value); water.setOptions(o); sync(); }; });
+  document.querySelectorAll('[data-color]').forEach(function (inp) {
+    inp.oninput = function () { var c = Object.assign({}, water.opts.colors || {}); c[inp.dataset.color] = inp.value; water.setOptions({ colors: c }); sync(); };
+  });
+  document.querySelectorAll('[data-toggle]').forEach(function (b) { b.onclick = function () { var o = {}; o[b.dataset.toggle] = !water.opts[b.dataset.toggle]; water.setOptions(o); sync(); }; });
+  $('new-map').onclick = function () { water.setOptions({ seed: water.opts.seed + 1 }); sync(); };
+  $('reset-colors').onclick = function () { water.setOptions({ colors: null }); sync(); };
+  $('copy').onclick = function () {
+    var t = $('config'); t.select();
+    (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).catch(function () { document.execCommand('copy'); });
+    $('copy').textContent = 'Copied'; setTimeout(function () { $('copy').textContent = 'Copy code'; }, 1200);
+  };
+
+  // pointer: orbit / drop / stir
+  var down = null, moved = 0;
+  canvas.addEventListener('pointerdown', function (e) { canvas.setPointerCapture(e.pointerId); down = { x: e.clientX, y: e.clientY }; moved = 0; canvas.focus(); });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!down) return;
+    var dx = e.clientX - down.x, dy = e.clientY - down.y; moved += Math.abs(dx) + Math.abs(dy); down.x = e.clientX; down.y = e.clientY;
+    var r = canvas.getBoundingClientRect(), m = water.opts.mode;
+    if (m === '3d') { water.cam.auto = false; water.cam.yaw += dx * 0.006; water.cam.pitch = Math.min(1.3, Math.max(0.05, water.cam.pitch + dy * 0.004)); }
+    else if (m === 'side') { var w = water.screenToWorld(e.clientX - r.left, e.clientY - r.top); water.splash(w.x, w.y, Math.min(Math.abs(dy) * 0.6 + 2, 14), 18); }
+    else { var t = water.screenToWorld(e.clientX - r.left, e.clientY - r.top); water.splash(t.x, t.y, 0.5, 2); }
+  });
+  canvas.addEventListener('pointerup', function (e) {
+    var r = canvas.getBoundingClientRect();
+    if (down && moved < 6) water.drop(e.clientX - r.left, e.clientY - r.top);
+    down = null;
+  });
+  canvas.addEventListener('wheel', function (e) { e.preventDefault(); water.cam.dist = Math.min(80, Math.max(6, water.cam.dist * Math.exp(e.deltaY * 0.001))); }, { passive: false });
+  var KEYS = { ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down', ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right' };
+  window.addEventListener('keydown', function (e) { if (KEYS[e.key] && !/INPUT|TEXTAREA|BUTTON/.test(e.target.tagName)) { water.input[KEYS[e.key]] = true; e.preventDefault(); } });
+  window.addEventListener('keyup', function (e) { if (KEYS[e.key]) water.input[KEYS[e.key]] = false; });
+
+  var last = performance.now(), frames = 0, acc = 0;
+  function tick(now) {
+    var dt = Math.min(Math.max((now - last) / 1000, 0), 0.1); last = now;
+    water.update(dt); water.render();
+    frames++; acc += dt;
+    if (acc > 0.5) { $('hud').textContent = Math.round(frames / acc) + ' fps · ' + water.stats.lowW + '×' + water.stats.lowH + ' internal'; frames = 0; acc = 0; }
+    requestAnimationFrame(tick);
+  }
+  sync();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

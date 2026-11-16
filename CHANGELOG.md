@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+- **Water Lite** (`lite/`): a separate, single-file engine for low-end and stylized browser games.
+  - Views: a 3D ocean, a 2D side view and a 2D top-down view.
+  - Art styles: realistic, toon, pixel art, low poly, retro and ink.
+  - Retro palettes with clean ordered dithering, and four quality presets.
+  - Transparent water-only output and a custom land map for the top view.
+  - A demo page that copies the exact setup code.
+
 ## 1.0.0
 
 First public release.

@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 media/shots/
 media/video/
 *.mp4
