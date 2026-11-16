@@ -2392,7 +2392,7 @@
     var i = 0;
     function next() {
       if (i >= tries.length) return Promise.resolve(null);
-      var c = tries[i++], cfg = { codec: c[1], width: w, height: h, bitrate: 24e6, framerate: fps };
+      var c = tries[i++], cfg = { codec: c[1], width: w, height: h, bitrate: 14e6, framerate: fps };
       return VideoEncoder.isConfigSupported(cfg).then(function (r) { return r.supported ? { mux: c[0], cfg: cfg } : next(); }, next);
     }
     return next();
