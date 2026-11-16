@@ -76,6 +76,16 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     </div>
   </div>
   <div>
+    <h2>Time and weather</h2>
+    <div class="seg" id="moods">
+      <button type="button" data-mood="day">Day</button>
+      <button type="button" data-mood="sunset">Sunset</button>
+      <button type="button" data-mood="night">Night</button>
+      <button type="button" data-mood="storm">Storm</button>
+    </div>
+    <div class="row" style="margin-top:8px"><label for="rain">Rain</label><input id="rain" type="range" min="-0.05" max="1" step="0.05"><output id="o-rain"></output></div>
+  </div>
+  <div>
     <h2>Palette</h2>
     <div class="chips" id="palettes">
       <button type="button" data-palette="auto">Style default</button>
@@ -94,7 +104,16 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
       <button type="button" data-quality="low">Low</button>
       <button type="button" data-quality="medium">Medium</button>
       <button type="button" data-quality="high">High</button>
+      <button type="button" data-quality="auto">Auto</button>
     </div>
+    <div class="chips" style="margin-top:6px"><button type="button" id="bench">Test this device</button></div>
+    <p class="note" id="bench-out" style="margin-top:6px">Auto lowers the drawing resolution when frames get slow and raises it again when there is room.</p>
+  </div>
+  <div id="camera">
+    <h2>Camera</h2>
+    <div class="row" id="zoom-row"><label for="zoom">Zoom</label><input id="zoom" type="range" min="1" max="4" step="0.25"><output id="o-zoom"></output></div>
+    <div class="chips"><button type="button" id="big">Big world</button></div>
+    <p class="note" id="cam-note" style="margin-top:6px"></p>
   </div>
   <div>
     <h2>Look and motion</h2>
@@ -115,6 +134,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
       <button type="button" data-toggle="boat">Boat</button>
       <button type="button" data-toggle="floaters">Floating things</button>
       <button type="button" id="new-map">New map</button>
+      <button type="button" id="sound" aria-pressed="false">Sound</button>
     </div>
     <p class="note" style="margin-top:6px">Turn scenery off to keep only the water, so your own background or tiles show through.</p>
   </div>
@@ -155,17 +175,28 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     side: 'Click to drop crates, barrels and ducks · drag across the water to make waves',
     top: 'WASD or arrows to sail the boat · click to make ripples · fish scatter from the boat'
   };
+  var CAM_NOTES = {
+    side: 'Big world makes the side view 1440 wide; scroll with A and D or the arrow keys. Set water.camera2d.x in your game.',
+    top: 'Zoom in and the camera follows the boat; Big world makes a 480 × 270 map. Set water.camera2d or its follow target in your game.'
+  };
   function $(id) { return document.getElementById(id); }
-  var SLIDERS = ['pixelSize', 'dither', 'wind', 'waveHeight', 'choppiness', 'clarity', 'foam', 'sunElevation'];
+  var SLIDERS = ['pixelSize', 'dither', 'wind', 'waveHeight', 'choppiness', 'clarity', 'foam', 'sunElevation', 'rain', 'zoom'];
   var FMT = { pixelSize: function (v) { return v === 0 ? 'style' : v + ' px'; }, dither: function (v) { return v < 0 ? 'style' : v.toFixed(2); },
     wind: function (v) { return v.toFixed(1) + ' m/s'; }, waveHeight: function (v) { return v.toFixed(2) + '×'; }, choppiness: function (v) { return v.toFixed(2); },
-    clarity: function (v) { return v.toFixed(2) + '×'; }, foam: function (v) { return v.toFixed(2) + '×'; }, sunElevation: function (v) { return Math.round(v) + '°'; } };
+    clarity: function (v) { return v.toFixed(2) + '×'; }, foam: function (v) { return v.toFixed(2) + '×'; }, sunElevation: function (v) { return Math.round(v) + '°'; },
+    rain: function (v) { return v < 0 ? 'mood' : Math.round(v * 100) + '%'; }, zoom: function (v) { return v.toFixed(2) + '×'; } };
   function sync() {
     var o = water.opts;
     document.querySelectorAll('[data-mode]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.mode === o.mode)); });
     document.querySelectorAll('[data-style]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.style === o.style)); });
     document.querySelectorAll('[data-palette]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.palette === o.palette)); });
     document.querySelectorAll('[data-quality]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.quality === o.quality)); });
+    document.querySelectorAll('[data-mood]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.mood === o.mood)); });
+    $('camera').style.display = o.mode === '3d' ? 'none' : '';
+    $('zoom-row').style.display = o.mode === 'top' ? '' : 'none';
+    $('big').setAttribute('aria-pressed', String(o.mode === 'top' ? o.mapSize[0] > 160 : o.worldWidth > 480));
+    $('cam-note').textContent = CAM_NOTES[o.mode] || '';
+    if (o.mode === 'top') water.camera2d.follow = water.boat;
     document.querySelectorAll('[data-toggle]').forEach(function (b) { b.setAttribute('aria-pressed', String(!!o[b.dataset.toggle])); });
     $('new-map').style.display = o.mode === 'top' ? '' : 'none';
     SLIDERS.forEach(function (k) { var el = $(k); if (document.activeElement !== el) el.value = o[k]; $('o-' + k).textContent = FMT[k](+o[k]); });
@@ -181,6 +212,21 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
   document.querySelectorAll('[data-style]').forEach(function (b) { b.onclick = function () { water.setOptions({ style: b.dataset.style, colors: null, pixelSize: 0, dither: -1, palette: 'auto' }); sync(); }; });
   document.querySelectorAll('[data-palette]').forEach(function (b) { b.onclick = function () { water.setOptions({ palette: b.dataset.palette }); sync(); }; });
   document.querySelectorAll('[data-quality]').forEach(function (b) { b.onclick = function () { water.setOptions({ quality: b.dataset.quality }); sync(); }; });
+  document.querySelectorAll('[data-mood]').forEach(function (b) { b.onclick = function () { water.setOptions({ mood: b.dataset.mood }); sync(); }; });
+  $('big').onclick = function () {
+    if (water.opts.mode === 'top') water.setOptions({ mapSize: water.opts.mapSize[0] > 160 ? [160, 90] : [480, 270] });
+    else water.setOptions({ worldWidth: water.opts.worldWidth > 480 ? 480 : 1440 });
+    sync();
+  };
+  $('bench').onclick = function () {
+    $('bench-out').textContent = 'Testing…';
+    setTimeout(function () {
+      var r = water.benchmark(10), names = { potato: 'Potato', low: 'Low', medium: 'Medium', high: 'High' };
+      water.setOptions({ quality: r.recommended }); sync();
+      $('bench-out').textContent = Object.keys(r.ms).map(function (k) { return names[k] + ' ' + r.ms[k] + ' ms'; }).join(' · ') +
+        ' per frame. Using ' + names[r.recommended] + ', which leaves room for your game.';
+    }, 30);
+  };
   SLIDERS.forEach(function (k) { $(k).oninput = function () { var o = {}; o[k] = parseFloat($(k).value); water.setOptions(o); sync(); }; });
   document.querySelectorAll('[data-color]').forEach(function (inp) {
     inp.oninput = function () { var c = Object.assign({}, water.opts.colors || {}); c[inp.dataset.color] = inp.value; water.setOptions({ colors: c }); sync(); };
@@ -212,15 +258,69 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
   });
   canvas.addEventListener('wheel', function (e) { e.preventDefault(); water.cam.dist = Math.min(80, Math.max(6, water.cam.dist * Math.exp(e.deltaY * 0.001))); }, { passive: false });
   var KEYS = { ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down', ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right' };
-  window.addEventListener('keydown', function (e) { if (KEYS[e.key] && !/INPUT|TEXTAREA|BUTTON/.test(e.target.tagName)) { water.input[KEYS[e.key]] = true; e.preventDefault(); } });
+  window.addEventListener('keydown', function (e) { if (KEYS[e.key] && !/INPUT|TEXTAREA/.test(e.target.tagName)) { water.input[KEYS[e.key]] = true; e.preventDefault(); } });
   window.addEventListener('keyup', function (e) { if (KEYS[e.key]) water.input[KEYS[e.key]] = false; });
+
+  // sound: made on the fly with WebAudio (surf, rain, splashes and thunder from water.on events)
+  var audio = null;
+  function startAudio() {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    var ctx = new AC(), master = ctx.createGain(), len = ctx.sampleRate * 2, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0), i;
+    for (i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    master.gain.value = 0.6; master.connect(ctx.destination);
+    function bed(type, freq) {
+      var src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = buf; src.loop = true; f.type = type; f.frequency.value = freq; g.gain.value = 0;
+      src.connect(f); f.connect(g); g.connect(master); src.start();
+      return { f: f, g: g };
+    }
+    function burst(type, freq, q, gain, attack, decay, delay, pan) {
+      var t = ctx.currentTime + (delay || 0), src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain(), out = g;
+      src.buffer = buf; f.type = type; f.frequency.value = freq; f.Q.value = q;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+      src.connect(f); f.connect(g);
+      if (ctx.createStereoPanner && pan) { var p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); out = p; }
+      out.connect(master); src.start(t, Math.random() * 1.5); src.stop(t + attack + decay + 0.05);
+    }
+    return { ctx: ctx, master: master, surf: bed('lowpass', 420), rain: bed('highpass', 2600), burst: burst, lastSplash: 0 };
+  }
+  water.on('splash', function (e) {
+    if (!audio || audio.ctx.currentTime - audio.lastSplash < 0.06) return;
+    audio.lastSplash = audio.ctx.currentTime;
+    var v = Math.min(0.08 + (e.power || 1) * (e.mode === 'side' ? 0.03 : 0.25), 0.7);
+    audio.burst('bandpass', 700 + Math.random() * 900, 0.9, v, 0.004, 0.18 + v * 0.4);
+  });
+  water.on('lightning', function (e) {
+    if (!audio) return;
+    var pan = (e.x - 0.5) * 1.4, delay = 0.25 + Math.random() * 1.2;
+    audio.burst('highpass', 1800, 0.3, 0.22 * e.strength, 0.003, 0.25, delay, pan);       // the crack
+    audio.burst('lowpass', 110, 0.8, 0.9 * e.strength, 0.08, 2.6, delay + 0.05, pan);     // the rumble
+  });
+  $('sound').onclick = function () {
+    if (!audio) audio = startAudio();
+    if (!audio) { $('sound').textContent = 'No sound here'; return; }
+    var on = $('sound').getAttribute('aria-pressed') !== 'true';
+    if (on) audio.ctx.resume(); else audio.ctx.suspend();
+    $('sound').setAttribute('aria-pressed', String(on));
+  };
 
   var last = performance.now(), frames = 0, acc = 0;
   function tick(now) {
     var dt = Math.min(Math.max((now - last) / 1000, 0), 0.1); last = now;
+    if (water.opts.mode === 'side') water.camera2d.x += ((water.input.right ? 1 : 0) - (water.input.left ? 1 : 0)) * 260 * dt;
     water.update(dt); water.render();
+    if (audio && audio.ctx.state === 'running') {
+      var t = audio.ctx.currentTime, w = water.opts.wind / 10, surf = water.opts.mode === 'top' ? 0.06 : 0.1 + 0.06 * Math.sin(water.time * 0.55);
+      audio.surf.g.gain.setTargetAtTime(surf * (0.6 + w * 0.6), t, 0.4); audio.surf.f.frequency.setTargetAtTime(300 + w * 380, t, 0.5);
+      audio.rain.g.gain.setTargetAtTime(water.rainAmt * 0.22, t, 0.5);
+    }
     frames++; acc += dt;
-    if (acc > 0.5) { $('hud').textContent = Math.round(frames / acc) + ' fps · ' + water.stats.lowW + '×' + water.stats.lowH + ' internal'; frames = 0; acc = 0; }
+    if (acc > 0.5) {
+      var st = water.stats;
+      $('hud').textContent = Math.round(frames / acc) + ' fps · ' + st.lowW + '×' + st.lowH + ' internal' + (water.opts.quality === 'auto' ? ' · scale ' + st.scale : '');
+      frames = 0; acc = 0;
+    }
     requestAnimationFrame(tick);
   }
   sync();

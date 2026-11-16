@@ -43,7 +43,9 @@
     potato: { scale: 0.5, grid: 64, waves: 4, sim: 112, dpr: 1, sub: 2, terrain: 81, refr: 0.5, refl: false },
     low: { scale: 0.75, grid: 96, waves: 8, sim: 160, dpr: 1, sub: 2, terrain: 121, refr: 0.75, refl: true },
     medium: { scale: 1, grid: 128, waves: 12, sim: 224, dpr: 1.5, sub: 3, terrain: 161, refr: 1, refl: true },
-    high: { scale: 1, grid: 180, waves: 16, sim: 288, dpr: 2, sub: 3, terrain: 201, refr: 1, refl: true }
+    high: { scale: 1, grid: 180, waves: 16, sim: 288, dpr: 2, sub: 3, terrain: 201, refr: 1, refl: true },
+    // auto: low's simulation, with the drawing resolution adjusted from frame times (0.4 .. 1)
+    auto: { scale: 1, grid: 96, waves: 8, sim: 160, dpr: 1.5, sub: 2, terrain: 121, refr: 0.75, refl: true, auto: true }
   };
   // deep: colour of deep water; shallow: lit shallow water; tint: the colour water gives what you see through it
   // (sets how fast each colour is absorbed; defaults to shallow)
@@ -62,10 +64,15 @@
     clarity: 1,                                           // how far you see into the water (2 = twice as far)
     reflections: true,                                    // islands mirrored in the 3D sea; the world above mirrored in the side view
     colors: null,                                         // override any THEMES key, e.g. { deep: '#002244' }
-    sunElevation: 42, sunAzimuth: 215,
+    sunElevation: 42, sunAzimuth: 215,                    // a mood moves the sun unless you set these yourself
+    mood: 'day',                                          // 'day', 'sunset', 'night' or 'storm'
+    rain: -1,                                             // 0 .. 1; -1 = the mood's own (storms rain)
     scenery: true,                                        // false: only the water (transparent around it with { transparent: true })
     level: 0.55,                                          // side view: water line, fraction of the height from the top
     land: 'islands',                                      // top view: 'islands', 'none' or function (u, v) -> true/height
+    mapSize: [160, 90],                                   // top view: world size; bigger maps get more islands and scroll
+    zoom: 1,                                              // top view: 1 shows the whole map, 2 half as wide, ...
+    worldWidth: 480,                                      // side view: world width; wider than 480 scrolls with camera2d.x
     seed: 7, floaters: true, boat: true
   };
   // 2D bodies: height / width, the part that floats (heights from the centre, y down), centre of mass, density
@@ -74,6 +81,15 @@
     barrel: { ratio: 1.15, hull: [-0.5, 0.5], com: 0, density: 0.6 },
     duck: { ratio: 0.9, hull: [-0.1, 0.36], com: 0.16, density: 0.35 },
     boat: { ratio: 0.8, hull: [0.18, 0.42], com: 0.3, density: 0.45 }
+  };
+  // light: multiplies what is not lit by the sun or moon; sun: multiplies the theme's sun colour, or moon: replaces it;
+  // desat: how much colour drains from land and objects (moonlight); sky colours are mixed in (skyMid: a third stop);
+  // elev/az place the sun or moon; ink style swaps in its own paper and ink
+  var MOODS = {
+    day: { light: [1, 1, 1], sun: [1, 1, 1] },
+    sunset: { light: [0.86, 0.66, 0.58], sun: [1.1, 0.7, 0.42], soft: 0.35, skyTop: '#433a7e', skyMid: '#c4688a', skyHorizon: '#ffa368', elev: 7, az: 240, paper: '#f2dfc2', ink: '#3b2a2a' },
+    night: { light: [0.2, 0.26, 0.42], moon: [0.36, 0.42, 0.58], desat: 0.6, soft: 0.45, skyTop: '#040a1c', skyHorizon: '#172a52', elev: 34, az: 235, stars: 1, glow: 1, paper: '#1d2740', ink: '#efeadf' },
+    storm: { light: [0.5, 0.55, 0.6], moon: [0.36, 0.38, 0.42], desat: 0.35, soft: 0.3, skyTop: '#2e3741', skyHorizon: '#6a757d', elev: 55, rain: 0.7, wind: 1.6, lightning: 1, overcast: 1, murk: 1.35, paper: '#dfe1df', ink: '#1f2a33' }
   };
   var MAXD = 30;            // 3D: deepest water the under-water pass records, metres
   var SIDE = { W: 480, unit: 0.05, cliff: [46, 9, 5], deckX: 356, posts: [366, 414, 462] };
@@ -95,30 +111,44 @@
   //   detail: R caustics (light focused by ripples onto a floor), G clouds, B noise, A pebbles
   // ======================================================================================
   function tileNoise(N, cells, amps, salt) {
-    var out = new Float32Array(N * N), lo = 1e9, hi = -1e9, x, y, o;
-    for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
-      var v = 0;
-      for (o = 0; o < cells.length; o++) {
-        var L = cells[o], fx = x / N * L, fy = y / N * L, ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy;
-        var u = tx * tx * (3 - 2 * tx), w = ty * ty * (3 - 2 * ty), x1 = (ix + 1) % L, y1 = (iy + 1) % L;
-        v += amps[o] * ((hash2(ix, iy, salt + o) * (1 - u) + hash2(x1, iy, salt + o) * u) * (1 - w) + (hash2(ix, y1, salt + o) * (1 - u) + hash2(x1, y1, salt + o) * u) * w);
+    // lattice values and per-column weights are worked out once per octave, not per pixel
+    var out = new Float32Array(N * N), lo = 1e9, hi = -1e9, x, y, o, k;
+    for (o = 0; o < cells.length; o++) {
+      var L = cells[o], A = amps[o], lat = new Float64Array(L * L), I0 = new Int32Array(N), I1 = new Int32Array(N), U = new Float64Array(N);
+      for (k = 0; k < L * L; k++) lat[k] = hash2(k % L, Math.floor(k / L), salt + o);
+      for (x = 0; x < N; x++) { var fx = x / N * L, ix = Math.floor(fx), tx = fx - ix; I0[x] = ix; I1[x] = (ix + 1) % L; U[x] = tx * tx * (3 - 2 * tx); }
+      for (y = 0; y < N; y++) {
+        var r0 = I0[y] * L, r1 = I1[y] * L, w = U[y], row = y * N;
+        for (x = 0; x < N; x++) {
+          var u = U[x], a = I0[x], b = I1[x];
+          out[row + x] += A * ((lat[r0 + a] * (1 - u) + lat[r0 + b] * u) * (1 - w) + (lat[r1 + a] * (1 - u) + lat[r1 + b] * u) * w);
+        }
       }
-      out[y * N + x] = v; if (v < lo) lo = v; if (v > hi) hi = v;
     }
+    for (x = 0; x < N * N; x++) { if (out[x] < lo) lo = out[x]; if (out[x] > hi) hi = out[x]; }
     for (x = 0; x < N * N; x++) out[x] = (out[x] - lo) / (hi - lo);
     return out;
   }
   function worley(N, cells, salt) {
-    var F1 = new Float32Array(N * N), F2 = new Float32Array(N * N), px = [], py = [], i, j, x, y;
-    for (j = 0; j < cells; j++) for (i = 0; i < cells; i++) { px.push(hash2(i, j, salt)); py.push(hash2(i, j, salt + 17)); }
-    for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
-      var fx = x / N * cells, fy = y / N * cells, cx = Math.floor(fx), cy = Math.floor(fy), d1 = 9, d2 = 9;
-      for (var oy = -1; oy <= 1; oy++) for (var ox = -1; ox <= 1; ox++) {
-        var gx = cx + ox, gy = cy + oy, wx = (gx + cells) % cells, wy = (gy + cells) % cells;
-        var dx = gx + px[wy * cells + wx] - fx, dy = gy + py[wy * cells + wx] - fy, d = Math.sqrt(dx * dx + dy * dy);
-        if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+    // feature points on a grid padded by one cell on each side, so neighbours need no wrapping
+    var F1 = new Float32Array(N * N), F2 = new Float32Array(N * N), P = cells + 2, qx = new Float64Array(P * P), qy = new Float64Array(P * P), i, j, x, y;
+    for (j = 0; j < P; j++) for (i = 0; i < P; i++) {
+      var wi = (i - 1 + cells) % cells, wj = (j - 1 + cells) % cells;
+      qx[j * P + i] = i - 1 + hash2(wi, wj, salt); qy[j * P + i] = j - 1 + hash2(wi, wj, salt + 17);
+    }
+    for (y = 0; y < N; y++) {
+      var fy = y / N * cells, cy = Math.floor(fy);
+      for (x = 0; x < N; x++) {
+        var fx = x / N * cells, cx = Math.floor(fx), d1 = 81, d2 = 81;
+        for (var oy = 0; oy < 3; oy++) {
+          var base = (cy + oy) * P + cx;
+          for (var ox = 0; ox < 3; ox++) {
+            var dx = qx[base + ox] - fx, dy = qy[base + ox] - fy, d = dx * dx + dy * dy;   // squared; sqrt once below
+            if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+          }
+        }
+        F1[y * N + x] = Math.sqrt(d1); F2[y * N + x] = Math.sqrt(d2);
       }
-      F1[y * N + x] = d1; F2[y * N + x] = d2;
     }
     return { f1: F1, f2: F2 };
   }
@@ -135,16 +165,21 @@
       var fl = Math.sqrt(kx * kx + ky * ky);
       waves.push({ kx: kx, ky: ky, a: (0.6 + 0.4 * R()) / fl, ph: R() * 6.2832, low: fl <= 7 });
     }
-    var TAU = Math.PI * 2;
+    var TAU = Math.PI * 2, mask = N - 1, tA = new Float64Array(N), tX = new Float64Array(N), tY = new Float64Array(N);
     waves.forEach(function (W) {
-      var dx = TAU * W.kx / N, dy = TAU * W.ky / N, cs = Math.cos(dx), sn = Math.sin(dx), gxs = W.a * dx, gys = W.a * dy;
+      // whole-number wave vectors: the phase at (x, y) is (kx x + ky y) mod N, so one table per wave covers the tile
+      var gxs = W.a * TAU * W.kx / N, gys = W.a * TAU * W.ky / N;
+      for (var p = 0; p < N; p++) {
+        var t = TAU * p / N + W.ph, e = EXPT[((Math.sin(t) + 1) * 512) | 0], de = e * Math.cos(t);
+        tA[p] = W.a * e; tX[p] = gxs * de; tY[p] = gys * de;
+      }
       for (y = 0; y < N; y++) {
-        var t0 = dy * y + W.ph, s = Math.sin(t0), c = Math.cos(t0), row = y * N;
+        var ph = (W.ky * y) & mask, row = y * N;
         for (x = 0; x < N; x++) {
-          var e = EXPT[((s + 1) * 512) | 0], de = e * c, k = row + x;
-          H[k] += W.a * e; GX[k] += gxs * de; GY[k] += gys * de;
-          if (W.low) { LX[k] += gxs * de; LY[k] += gys * de; }
-          var s2 = s * cs + c * sn; c = c * cs - s * sn; s = s2;
+          var k = row + x;
+          H[k] += tA[ph]; GX[k] += tX[ph]; GY[k] += tY[ph];
+          if (W.low) { LX[k] += tX[ph]; LY[k] += tY[ph]; }
+          ph = (ph + W.kx) & mask;
         }
       }
     });
@@ -200,6 +235,10 @@
     'uniform vec3 uSkyTop; uniform vec3 uSkyHor; uniform vec3 uSunCol; uniform vec3 uSunDir;',
     'uniform vec3 uSand; uniform vec3 uGrass; uniform vec3 uRock; uniform vec3 uWood;',
     'uniform vec2 uCloudOff; uniform sampler2D uDetail; uniform sampler2D uWaterTex;',
+    // moods and weather: uLight dims what is not lit by uSunCol (night, storm); uGlow lights foam at night
+    'uniform vec3 uLight; uniform vec3 uGlowCol; uniform float uGlow; uniform float uStars; uniform float uRain; uniform float uOvercast;',
+    'uniform vec3 uSkyMid; uniform float uDesat;',
+    'vec3 moodTint(vec3 c) { return mix(c, vec3(dot(c, vec3(0.3, 0.59, 0.11))), uDesat); }   // objects lose colour by moonlight',
     'bool isStyle(float s) { return abs(uStyle - s) < 0.5; }',
     'bool smoothStyle() { return uBands < 0.5 && uCrisp < 0.5; }',
     'float hash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
@@ -255,20 +294,45 @@
     '  float od = dot(uSigma, vec3(0.3333)) * path;',
     '  return mix(uShallow, uDeep, band(clamp(od / 2.2, 0.0, 1.0), max(uBands, 2.0)));',
     '}',
-    'vec3 seabedSand() { return mix(uSand, vec3(0.93, 0.95, 0.95), 0.5); }    // coral sand under water reads paler'
+    'vec3 seabedSand() { return mix(uSand, vec3(0.93, 0.95, 0.95), 0.5); }    // coral sand under water reads paler',
+    // rain: rings spreading from where drops land; xy is the slope they add, z how bright the ring is
+    'vec3 rainRing(vec2 p, float seed) {',
+    '  vec2 c = floor(p), f = fract(p) - 0.5;',
+    '  float h = hash(c + seed);',
+    '  if (h > uRain) return vec3(0.0);',
+    '  vec2 o = (vec2(hash(c + seed + 3.7), hash(c + seed + 9.1)) - 0.5) * 0.36;',
+    '  float ph = fract(uTime * 1.15 + h * 17.0);',
+    '  vec2 v = f - o; float r = length(v) + 1e-4;',
+    '  float x = (r - ph * 0.4) * 20.0, env = (1.0 - ph) * (1.0 - ph) * (1.0 - smoothstep(0.38, 0.5, r)), g = exp(-x * x);',
+    '  return vec3(v / r * (-2.0 * x * g) * env * 0.16, g * env);',
+    '}',
+    'vec3 rainRings(vec2 p) { return uRain < 0.01 ? vec3(0.0) : rainRing(p, 0.0) + rainRing(p * 1.37 + 0.5, 7.3); }',
+    // a star in this cell of a sky grid, twinkling
+    'float starAt(vec2 g) {',
+    '  vec2 c = floor(g), f = fract(g) - 0.5;',
+    '  float h = hash(c + 0.37);',
+    '  if (h < 0.955) return 0.0;',
+    '  vec2 o = (vec2(hash(c + 1.3), hash(c + 4.1)) - 0.5) * 0.5;',
+    '  float tw = 0.6 + 0.4 * sin(uTime * (1.3 + 3.0 * h) + h * 40.0);',
+    '  return (1.0 - smoothstep(0.06, 0.17, length(f - o))) * tw * (0.5 + 10.0 * (h - 0.955));',
+    '}',
+    'vec3 diskColor() { return uSunCol / max(max(uSunCol.r, uSunCol.g), max(uSunCol.b, 0.2)); }   // the sun or moon itself stays bright'
   ].join('\n') + '\n';
   var SKY_FN = [
+    'uniform float uStarCell;                                              // star grid cells per radian',
     'vec3 skyColor(vec3 d) {',
     '  float h = max(d.y, 0.0), mu = max(dot(d, uSunDir), 0.0);',
     '  float g = pow(h, 0.45);',
-    '  vec3 c = mix(uSkyHor, uSkyTop, uBands > 0.5 ? band(g, 4.0) : g);',
-    '  if (uBands < 0.5) c += uSunCol * (pow(mu, 6.0) * 0.16 + pow(mu, 48.0) * 0.3);',
+    '  float gg = uBands > 0.5 ? band(g, 4.0) : g;',
+    '  vec3 c = gg < 0.5 ? mix(uSkyHor, uSkyMid, gg * 2.0) : mix(uSkyMid, uSkyTop, gg * 2.0 - 1.0);',
+    '  if (uBands < 0.5) c += uSunCol * (pow(mu, 6.0) * 0.16 + pow(mu, 48.0) * 0.3) * (1.0 - 0.6 * uOvercast);',
     '  if (d.y > 0.0) {',
+    '    if (uStars > 0.01) c += vec3(0.9, 0.93, 1.0) * starAt(vec2(atan(d.z, d.x), asin(clamp(d.y, 0.0, 1.0))) * uStarCell) * uStars * smoothstep(0.02, 0.2, d.y);',
     '    vec2 cp = d.xz / (d.y + 0.12) * 0.06 + uCloudOff;',
-    '    float cl = texture2D(uDetail, cp).g;',
-    '    float cov = uCrisp > 0.5 ? step(0.62, cl) : smoothstep(0.5, 0.78, cl);',
-    '    vec3 cc = mix(vec3(1.0), uSkyHor, 0.15) * (0.84 + 0.22 * pow(mu, 3.0));',
-    '    if (uCrisp > 0.5) cc = mix(cc, mix(vec3(1.0), uSkyHor, 0.55), step(cl, 0.67));',
+    '    float cl = texture2D(uDetail, cp).g, lo = 0.5 - 0.22 * uOvercast;',
+    '    float cov = uCrisp > 0.5 ? step(lo + 0.12, cl) : smoothstep(lo, lo + 0.28, cl);',
+    '    vec3 cc = mix(vec3(1.0), uSkyHor, 0.15) * (0.84 + 0.22 * pow(mu, 3.0)) * uLight;',
+    '    if (uCrisp > 0.5) cc = mix(cc, mix(vec3(1.0), uSkyHor, 0.55) * uLight, step(cl, lo + 0.17));',
     '    c = mix(c, cc, cov * smoothstep(0.0, 0.12, d.y) * 0.92);',
     '  }',
     '  return c;',
@@ -281,6 +345,18 @@
   var FS_SKY = SKY_FN + [
     'varying vec2 vUv;',
     'uniform vec3 uRight; uniform vec3 uUp; uniform vec3 uFwd; uniform vec2 uTan;',
+    'uniform vec4 uBolt; uniform float uPxAng;                            // bolt: azimuth, top elevation, seed, brightness',
+    'float bolt(vec3 d) {                                                  // a jagged lightning bolt from the clouds to the sea',
+    '  float el = asin(clamp(d.y, -1.0, 1.0)), t = clamp(1.0 - el / uBolt.y, 0.0, 1.0);',
+    '  if (uBolt.w <= 0.0 || el < -0.01 || el > uBolt.y) return 0.0;',
+    '  float k = floor(t * 9.0), f = fract(t * 9.0);',
+    '  float a0 = (hash(vec2(k, uBolt.z)) - 0.5) * 0.05 * (0.3 + k / 9.0), a1 = (hash(vec2(k + 1.0, uBolt.z)) - 0.5) * 0.05 * (0.3 + (k + 1.0) / 9.0);',
+    '  float da = atan(d.z, d.x) - uBolt.x;',
+    '  da = mod(da + 3.14159, 6.28318) - 3.14159;',
+    '  float sl = (a1 - a0) / (uBolt.y / 9.0);',
+    '  float dist = abs(da - mix(a0, a1, f)) / sqrt(1.0 + sl * sl) / uPxAng;   // in pixels',
+    '  return uBolt.w * (1.0 - smoothstep(0.5, 1.6, dist) + 0.35 * exp(-dist / 7.0));',
+    '}',
     'void main() {',
     '  if (uScenery < 0.5) { gl_FragColor = vec4(0.0); return; }',
     '  vec2 n = vUv * 2.0 - 1.0;',
@@ -295,7 +371,8 @@
     '  } else {',
     '    c = skyColor(d);',
     '    float disk = uCrisp > 0.5 ? step(0.9985, mu) : smoothstep(0.99935, 0.9997, mu);',
-    '    c = mix(c, uSunCol * 1.15, disk * step(0.0, d.y));',
+    '    c = mix(c, diskColor() * 1.1, disk * step(0.0, d.y) * (1.0 - 0.85 * uOvercast));',
+    '    c = mix(c, vec3(0.92, 0.94, 1.0), clamp(bolt(d), 0.0, 1.0));',
     '  }',
     '  gl_FragColor = vec4(c, 1.0);',
     '}'
@@ -304,11 +381,11 @@
   // ---- 3D: terrain, palms, rocks and floating things ------------------------------------
   var VS_WORLD = VS_HEAD + [
     'attribute vec3 aPos; attribute vec3 aNormal; attribute vec4 aColor;',
-    'uniform mat4 uViewProj; uniform mat4 uModel; uniform float uSnap; uniform vec2 uRes; uniform float uWaveTime; uniform float uWindAmt;',
+    'uniform mat4 uViewProj; uniform mat4 uModel; uniform float uSnap; uniform vec2 uRes; uniform float uWaveTime; uniform float uWindAmt; uniform float uIsTerrain;',
     'varying vec3 vW; varying vec3 vN; varying vec4 vC;',
     'void main() {',
     '  vec4 w = uModel * vec4(aPos, 1.0);',
-    '  float s = aColor.a * uWindAmt;                                      // palm fronds move in the wind',
+    '  float s = aColor.a * uWindAmt * (1.0 - uIsTerrain);                 // palm fronds move in the wind',
     '  w.xz += s * vec2(sin(uWaveTime * 1.9 + w.x * 0.37 + w.z * 0.11), cos(uWaveTime * 1.4 + w.z * 0.33)) * 0.35;',
     '  w.y += s * sin(uWaveTime * 2.3 + w.x) * 0.12;',
     '  vW = w.xyz; vN = (uModel * vec4(aNormal, 0.0)).xyz; vC = aColor;',
@@ -350,11 +427,11 @@
     '  col = mix(col, uRock * 0.8, smoothstep(0.68, 0.76, cells) * smoothstep(4.0, 7.0, depth) * 0.75);',
     '  return col * (0.95 + 0.05 * sin(dot(p.xz, vec2(1.9, 1.1)) + n2 * 7.0));   // sand ripples',
     '}',
-    'vec3 litSurface(vec3 albedo, vec3 N, vec3 p) {',
+    'vec3 litSurface(vec3 albedo, vec3 N, vec3 p, float ao) {',
     '  float diff = max(dot(N, uSunDir), 0.0);',
     '  diff = cel(diff);',
-    '  vec3 amb = mix(uSkyHor * 0.5, uSkyTop * 0.48, N.y * 0.5 + 0.5) * (uBands > 0.5 ? 0.75 : 1.0);',
-    '  vec3 sun = uSunCol * diff;',
+    '  vec3 amb = mix(uSkyHor * 0.5, uSkyTop * 0.48, N.y * 0.5 + 0.5) * (uBands > 0.5 ? 0.75 : 1.0) * ao;',
+    '  vec3 sun = uSunCol * diff * (0.7 + 0.3 * ao);',
     '  if (p.y < 0.0) {                                                     // under water: dimmer, bluer, with caustics',
     '    float depth = -p.y, sh = underShadow(p);',
     '    vec3 att = exp(-uSigma * depth * 0.5);',
@@ -380,7 +457,8 @@
     '#ifdef HAS_DERIV',
     '  if (isStyle(3.0)) { vec3 fN = normalize(cross(dFdx(vW), dFdy(vW))); N = dot(fN, N) < 0.0 ? -fN : fN; }',
     '#endif',
-    '  vec3 col = isStyle(5.0) ? inkSurface(vW, N) : litSurface(uIsTerrain > 0.5 ? terrainAlbedo(vW, N) : vC.rgb, N, vW);',
+    '  float ao = uIsTerrain > 0.5 ? (uBands > 0.5 ? 0.6 + 0.4 * step(0.72, vC.r) : vC.r) : 1.0;',
+    '  vec3 col = isStyle(5.0) ? inkSurface(vW, N) : litSurface(uIsTerrain > 0.5 ? terrainAlbedo(vW, N) : moodTint(vC.rgb), N, vW, ao);',
     '  if (uPass > 0.5 && uPass < 1.5) { gl_FragColor = vec4(col, clamp(-vW.y / uMaxD, 0.0, 1.0)); return; }',
     '  float fog = smoothstep(uFogR * 0.3, uFogR * 0.95, length(uCamPos - vW));',
     '  if (uBands > 0.5) fog = band(fog, 4.0);',
@@ -393,13 +471,13 @@
     'attribute vec2 aGrid;',
     'uniform mat4 uViewProj; uniform vec2 uCenter; uniform float uGridR; uniform float uGridPow; uniform float uWaveTime;',
     'uniform vec4 uWA[16]; uniform vec4 uWB[16]; uniform float uWaveCount; uniform vec4 uIslands[6];',
-    'uniform float uSnap; uniform vec2 uRes;',
+    'uniform float uSnap; uniform vec2 uRes; uniform float uSwash;',
     'varying vec3 vWorld; varying vec3 vNormal; varying float vJac; varying float vHeight;',
     'void main() {',
     '  vec2 p = sign(aGrid) * pow(abs(aGrid), vec2(uGridPow)) * uGridR + uCenter;     // denser under the camera',
     '  float fade = 1.0 - smoothstep(uGridR * 0.55, uGridR * 0.95, length(p - uCenter));',
-    '  float att = 1.0;                                                    // reefs calm the lagoons',
-    '  for (int k = 0; k < 6; k++) { vec4 il = uIslands[k]; if (il.z > 0.0) att = min(att, smoothstep(1.15, 2.1, length(p - il.xy) / il.z)); }',
+    '  float att = 1.0, um = 9.0;                                          // reefs calm the lagoons',
+    '  for (int k = 0; k < 6; k++) { vec4 il = uIslands[k]; if (il.z > 0.0) { float u = length(p - il.xy) / il.z; um = min(um, u); att = min(att, smoothstep(1.15, 2.1, u)); } }',
     '  fade *= 0.1 + 0.9 * att;',
     '  vec3 pos = vec3(p.x, 0.0, p.y), n = vec3(0.0, 1.0, 0.0);',
     '  float jxx = 1.0, jzz = 1.0, jxz = 0.0;',
@@ -412,6 +490,7 @@
     '    n.x -= a.x * wa * c; n.z -= a.y * wa * c; n.y -= b.z * wa * s;',
     '    jxx -= b.z * wa * a.x * a.x * s; jzz -= b.z * wa * a.y * a.y * s; jxz -= b.z * wa * a.x * a.y * s;',
     '  }',
+    '  pos.y += uSwash * sin(uWaveTime * 0.9 - um * 11.0) * (1.0 - smoothstep(1.0, 1.35, um));   // swash: the waterline runs up and down the beach',
     '  vWorld = pos; vNormal = n; vJac = jxx * jzz - jxz * jxz; vHeight = pos.y;',
     '  vec4 cp = uViewProj * vec4(pos, 1.0);',
     '  if (uSnap > 0.0) cp.xy = floor(cp.xy / cp.w * uRes * 0.5 + 0.5) / (uRes * 0.5) * cp.w;',
@@ -427,6 +506,9 @@
     '  vec3 toCam = uCamPos - vWorld; float dist = length(toCam); vec3 V = toCam / dist;',
     '  vec2 rp = ripples(vWorld.xz * 0.06, uTime);',
     '  vec3 N = normalize(normalize(vNormal) + vec3(rp.x, 0.0, rp.y) * uDetailAmt / (1.0 + dist * 0.025));',
+    '  vec3 rr = rainRings(vWorld.xz * 0.7) * (1.0 - smoothstep(25.0, 70.0, dist));   // rain rings near the camera',
+    '  N = normalize(N + vec3(rr.x, 0.0, rr.y));',
+    '  vec3 foamC = uFoamCol * uLight;',
     '#ifdef HAS_DERIV',
     '  if (isStyle(3.0)) { N = normalize(cross(dFdx(vWorld), dFdy(vWorld))); if (N.y < 0.0) N = -N; }',
     '#endif',
@@ -442,9 +524,9 @@
     '  float path = depth / max(-tdir.y, 0.1);',
     '  vec3 T = absorb(path, uSigma);',
     '  float crest = clamp(vHeight / max(uAmp, 0.05) * 0.5 + 0.5, 0.0, 1.0);',
-    '  vec3 scatter = scatterColor(path) * (0.55 + 0.6 * clamp(uSunDir.y, 0.0, 1.0));',
+    '  vec3 scatter = scatterColor(path) * (0.55 + 0.6 * clamp(uSunDir.y, 0.0, 1.0)) * uLight;',
     '  vec3 refr = r1.rgb * T + scatter * (1.0 - T);',
-    '  if (smoothStyle()) refr += uShallow * 0.35 * pow(max(dot(-V, uSunDir), 0.0), 4.0) * crest * (1.0 - T.g);   // sun through the crests',
+    '  if (smoothStyle()) refr += uShallow * uLight * 0.35 * pow(max(dot(-V, uSunDir), 0.0), 4.0) * crest * (1.0 - T.g);   // sun through the crests',
     // reflection of the sky (and the islands, when they are rendered)
     '  vec3 R = reflect(-V, N); R.y = abs(R.y);',
     '  vec3 refl = skyColor(R);',
@@ -457,7 +539,7 @@
     '  if (uBands > 0.5) {',
     '    float hl = texture2D(uWaterTex, vWorld.xz * vec2(0.03, 0.09) + uTime * vec2(0.004, 0.012)).b;',
     '    float hv = hl + crest * 0.15, wl = isStyle(2.0) ? step(0.8, hv) : step(0.8, hv) * (1.0 - step(0.835, hv));   // thin wave lines',
-    '    col = mix(col, mix(col, uFoamCol, 0.6), wl * (1.0 - smoothstep(uFogR * 0.1, uFogR * 0.35, dist)) * step(1.5, colDepth));',
+    '    col = mix(col, mix(col, foamC, 0.6), wl * (1.0 - smoothstep(uFogR * 0.1, uFogR * 0.35, dist)) * step(1.5, colDepth));',
     '  }',
     // foam: on the waterline, in bands rolling in to the beach, on steep crests and in wakes
     '  float lace = texture2D(uWaterTex, vWorld.xz * 0.12 + vec2(uTime * 0.01, 0.0)).a;',
@@ -471,7 +553,12 @@
     '  }',
     '  float fm = max(max(shore, bands * 0.85), max(crestF, wake)) * uFoam;',
     '  float foam = max(thr(fm * (0.45 + 0.85 * lace), 0.5, 0.12), (1.0 - smoothstep(0.0, 0.1, colDepth)) * step(0.01, uFoam));',
-    '  col = mix(col, uFoamCol * (0.72 + 0.28 * max(dot(N, uSunDir), 0.0)), foam);',
+    '  col = mix(col, foamC * (0.72 + 0.28 * max(dot(N, uSunDir), 0.0)), foam);',
+    '  col += foamC * rr.z * 0.25 * step(0.5, colDepth);                    // the rings catch a little light',
+    '  if (uGlow > 0.01) {                                                 // at night, churned water glows',
+    '    float glw = max(max(shore * 0.9, wake), max(crestF * 0.5, bands * 0.6)) * (0.35 + 0.9 * lace) + rr.z * 0.5;',
+    '    col += uGlowCol * uGlow * glw * (0.75 + 0.25 * sin(uTime * 2.7 + lace * 9.0));',
+    '  }',
     '  if (isStyle(5.0)) {',
     '    vec3 under = mix(uPaper, r1.rgb, clamp(dot(T, vec3(0.333)) * 0.9, 0.0, 1.0));',
     '    float row = floor(gl_FragCoord.y / 4.0);',
@@ -492,8 +579,9 @@
   // ---- 2D side view, pass 1: everything behind and under the water ------------------------
   var SIDE_SURF = [
     'uniform sampler2D uHeights; uniform float uCols; uniform vec2 uView; uniform float uLevel; uniform float uRange;',
+    'uniform float uWorldW; uniform float uCamX;                         // the view is uView wide, starting at uCamX in a world uWorldW wide',
     'float hRaw(float x) {',
-    '  float u = clamp(x / uView.x, 0.0, 1.0) * (uCols - 1.0), i0 = floor(u), f = u - i0;',
+    '  float u = clamp(x / uWorldW, 0.0, 1.0) * (uCols - 1.0), i0 = floor(u), f = u - i0;',
     '  vec4 a = texture2D(uHeights, vec2((i0 + 0.5) / uCols, 0.5));',
     '  vec4 b = texture2D(uHeights, vec2((min(i0 + 1.0, uCols - 1.0) + 0.5) / uCols, 0.5));',
     '  float ha = (a.r * 65280.0 + a.a * 255.0) / 65535.0, hb = (b.r * 65280.0 + b.a * 255.0) / 65535.0;',
@@ -503,38 +591,56 @@
     '  if (isStyle(3.0)) { float k = floor(x / 16.0) * 16.0; return mix(hRaw(k), hRaw(k + 16.0), (x - k) / 16.0); }',
     '  return hRaw(x);',
     '}',
-    'vec2 toUv(vec2 q) { return vec2(q.x / uView.x, 1.0 - q.y / uView.y); }'
+    'vec2 toUv(vec2 q) { return vec2((q.x - uCamX) / uView.x, 1.0 - q.y / uView.y); }',
+    'vec2 viewPos(vec2 uv) { return vec2(uv.x * uView.x + uCamX, (1.0 - uv.y) * uView.y); }   // world units, y down'
   ].join('\n') + '\n';
   var FS_SIDE_BG = SIDE_SURF + [
     'varying vec2 vUv;',
     'uniform vec4 uCliff; uniform vec4 uDock; uniform vec3 uPosts;',
+    'uniform vec2 uSunPos; uniform vec4 uBolt; uniform float uPxU; uniform float uStarCell;',
     'float cliffX(float y) { return uCliff.x + uCliff.y * sin(y * 0.045) + uCliff.z * sin(y * 0.11 + 1.3); }',
+    'float sideBolt(float x, float y) {                                    // uBolt: x on screen, bottom y, seed, brightness',
+    '  if (y > uBolt.y) return 0.0;',
+    '  float t = y / uBolt.y, k = floor(t * 9.0), f = fract(t * 9.0);',
+    '  float x0 = uBolt.x + (hash(vec2(k, uBolt.z)) - 0.5) * 34.0 * (0.3 + k / 9.0);',
+    '  float x1 = uBolt.x + (hash(vec2(k + 1.0, uBolt.z)) - 0.5) * 34.0 * (0.3 + (k + 1.0) / 9.0);',
+    '  float sl = (x1 - x0) / (uBolt.y / 9.0);',
+    '  float dist = abs(x - mix(x0, x1, f)) / sqrt(1.0 + sl * sl) / uPxU;',
+    '  return uBolt.w * (1.0 - smoothstep(0.5, 1.6, dist) + 0.35 * exp(-dist / 7.0));',
+    '}',
     'float seabed(float x) { return uView.y - 12.0 - 16.0 * texture2D(uDetail, vec2(x * 0.0019, 0.13)).b; }',
     'void main() {',
-    '  vec2 p = vec2(vUv.x, 1.0 - vUv.y) * uView;                          // view units, y down',
+    '  vec2 p = viewPos(vUv);',
+    '  float sx = p.x - uCamX;                                              // across the screen; far layers scroll slower',
     '  float ys = uLevel - surf(p.x);',
     '  bool under = p.y > ys;',
     '  float bottom = seabed(p.x), n2 = tnoise(p * 0.013);',
-    '  float far = uLevel - uView.y * (0.07 + 0.2 * texture2D(uDetail, vec2(p.x * 0.0011, 0.71)).b);',
-    '  float mid = uLevel - uView.y * (0.03 + 0.11 * texture2D(uDetail, vec2(p.x * 0.0031 + 0.3, 0.27)).b);',
-    '  float reef = bottom - 18.0 - 52.0 * texture2D(uDetail, vec2(p.x * 0.0033 + 0.55, 0.83)).b;',
+    '  float far = uLevel - uView.y * (0.07 + 0.2 * texture2D(uDetail, vec2((sx + uCamX * 0.25) * 0.0011, 0.71)).b);',
+    '  float mid = uLevel - uView.y * (0.03 + 0.11 * texture2D(uDetail, vec2((sx + uCamX * 0.55) * 0.0031 + 0.3, 0.27)).b);',
+    '  float reef = bottom - 18.0 - 52.0 * texture2D(uDetail, vec2((sx + uCamX * 0.85) * 0.0033 + 0.55, 0.83)).b;',
     '  float cx = cliffX(p.y), cliffTop = uCliff.w + 4.0 * sin(p.x * 0.1);',
-    '  vec2 sp = vec2(uView.x * 0.74, uLevel * 0.3);',
-    '  float sd = length(p - sp) / (uView.y * 0.055);',
-    '  float cl = texture2D(uDetail, vec2(p.x * 0.0017 + uTime * 0.0021, p.y * 0.0052 + 0.4), 1.5).g;',
+    '  float sd = length(vec2(sx, p.y) - uSunPos) / (uView.y * 0.055);',
+    '  float clx = sx + uCamX * 0.15;',
+    '  float cl = texture2D(uDetail, vec2(clx * 0.0017 + uTime * 0.0021, p.y * 0.0052 + 0.4), 1.5).g;',
     '  float cloudFade = 1.0 - smoothstep(uLevel * 0.25, uLevel * 0.78, p.y);',
     '  vec3 col = uDeep; float z = 1.0; bool lit = false; float ink = 0.0;',
+    '  vec3 L = uLight;                                                     // what the mood lights; the sky lights itself',
     '  if (!under) {',
     '    if (uScenery < 0.5) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }',
+    '    L = vec3(1.0);',
     '    float t = clamp(p.y / uLevel, 0.0, 1.0);',
-    '    col = mix(uSkyTop, uSkyHor, qz(pow(t, 1.3)));',
-    '    if (uBands < 0.5) col += uSunCol * (exp(-sd * 0.6) * 0.25 + exp(-sd * 0.15) * 0.1);',
-    '    col = mix(col, uSunCol * 1.1, uCrisp > 0.5 ? step(sd, 1.0) : 1.0 - smoothstep(0.94, 1.06, sd));',
-    '    float clDn = texture2D(uDetail, vec2(p.x * 0.0017 + uTime * 0.0021, (p.y + 7.0) * 0.0052 + 0.4), 1.5).g;',
-    '    vec3 cc = mix(vec3(1.0), uSkyHor, 0.05) * (uCrisp > 0.5 ? mix(0.86, 1.0, step(0.6, clDn)) : mix(0.84, 1.0, smoothstep(0.54, 0.68, clDn)));',
-    '    col = mix(col, cc, thr(cl, 0.6, 0.08) * cloudFade);',
-    '    if (p.y > far) col = mix(uSkyHor, uSkyTop * 0.55 + uGrass * 0.3, 0.3 + 0.12 * qz((p.y - far) / max(uLevel - far, 1.0)));',
-    '    if (p.y > mid) col = mix(uSkyHor, uGrass * (0.85 + 0.2 * n2), 0.62);',
+    '    float tt = qz(pow(t, 1.3));',
+    '    col = tt < 0.5 ? mix(uSkyTop, uSkyMid, tt * 2.0) : mix(uSkyMid, uSkyHor, tt * 2.0 - 1.0);',
+    '    float cov = thr(cl, 0.6 - 0.2 * uOvercast, 0.08) * cloudFade;',
+    '    if (uStars > 0.01) col += vec3(0.9, 0.93, 1.0) * starAt(vec2(sx + uCamX * 0.05, p.y) / uStarCell) * uStars * (1.0 - cov) * (1.0 - smoothstep(0.5, 0.85, t));',
+    '    if (uBands < 0.5) col += uSunCol * (exp(-sd * 0.6) * 0.25 + exp(-sd * 0.15) * 0.1) * (1.0 - 0.6 * uOvercast);',
+    '    col = mix(col, diskColor() * 1.1, (uCrisp > 0.5 ? step(sd, 1.0) : 1.0 - smoothstep(0.94, 1.06, sd)) * (1.0 - 0.85 * uOvercast));',
+    '    float clDn = texture2D(uDetail, vec2(clx * 0.0017 + uTime * 0.0021, (p.y + 7.0) * 0.0052 + 0.4), 1.5).g;',
+    '    vec3 cc = mix(vec3(1.0), uSkyHor, 0.05) * (uCrisp > 0.5 ? mix(0.86, 1.0, step(0.6, clDn)) : mix(0.84, 1.0, smoothstep(0.54, 0.68, clDn))) * uLight;',
+    '    col = mix(col, cc, cov);',
+    '    if (uBolt.w > 0.0) col = mix(col, vec3(0.92, 0.94, 1.0), clamp(sideBolt(sx, p.y), 0.0, 1.0));',
+    '    if (p.y > far) col = mix(uSkyHor, uSkyTop * 0.55 + uGrass * 0.3 * uLight, 0.3 + 0.12 * qz((p.y - far) / max(uLevel - far, 1.0)));',
+    '    if (p.y > mid) col = mix(uSkyHor, uGrass * (0.85 + 0.2 * n2) * uLight, 0.62);',
     '    ink = max(max(lineAA(sd - 1.0, sd, 1.2, 0.05), lineAA(cl - 0.62, cl, 0.9, 0.01) * cloudFade), max(lineAA(p.y - far, p.y, 1.1, 0.8), lineAA(p.y - mid, p.y, 1.3, 0.9)));',
     '    if (p.y > far) ink = max(ink, step(0.94, hash(floor(gl_FragCoord.xy))) * 0.5);',
     '  } else {',
@@ -561,25 +667,30 @@
     '  }',
     '  if (uScenery > 0.5) {',
     '    if (p.x < cx && p.y > cliffTop) {                                  // a cliff on the left, above and below the water',
+    '      L = uLight;',
     '      col = uRock * (0.86 + 0.14 * sin(p.y * 0.42 + n2 * 5.0)) * (0.72 + 0.38 * smoothstep(cx - 10.0, cx, p.x));',
     '      if (p.y < cliffTop + 6.0) col = uGrass * (0.9 + 0.2 * n2);',
     '      z = 0.02; lit = under;',
     '      ink = max(hatch(0.5, gl_FragCoord.xy) * 0.4, max(lineAA(p.x - cx, p.x, 1.4, 0.8), lineAA(p.y - cliffTop, p.y, 1.4, 0.8)));',
     '    }',
     '    if (p.x > uDock.x && p.y > uDock.y && p.y < uDock.y + uDock.z) {   // a wooden dock on the right',
-    '      col = uWood * (0.82 + 0.18 * step(0.5, fract(p.x / 9.0))); z = 0.02; ink = max(ink, step(fract(p.x / 9.0), 0.1));',
+    '      col = uWood * (0.82 + 0.18 * step(0.5, fract(p.x / 9.0))); z = 0.02; L = uLight; ink = max(ink, step(fract(p.x / 9.0), 0.1));',
     '    }',
     '    for (int i = 0; i < 3; i++) {',
     '      float px = i == 0 ? uPosts.x : (i == 1 ? uPosts.y : uPosts.z);',
     '      if (abs(p.x - px) < uDock.w && p.y > uDock.y && p.y < bottom + 4.0) {',
     '        col = uWood * 0.78 * (0.85 + 0.15 * sin(p.y * 0.7 + px));',
     '        if (under) col = mix(col, vec3(0.2, 0.36, 0.18), smoothstep(bottom - 40.0, bottom, p.y) * 0.6);',
-    '        z = 0.02; lit = under; ink = max(ink, smoothstep(uDock.w - 1.2, uDock.w, abs(p.x - px)));',
+    '        z = 0.02; lit = under; L = uLight; ink = max(ink, smoothstep(uDock.w - 1.2, uDock.w, abs(p.x - px)));',
     '      }',
     '    }',
     '  }',
-    '  if (under && lit && !isStyle(5.0)) { float ck = mix(1.0, 0.3, z) * exp(-(p.y - uLevel) / 140.0); col *= 1.0 - 0.38 * ck + 0.62 * ck * caustic(vec2(p.x * 0.011, p.y * 0.006 + p.x * 0.002)); }',
-    '  if (isStyle(5.0)) col = mix(uPaper, uInk, max(ink, under ? 0.0 : 0.0));',
+    '  if (under && lit && !isStyle(5.0)) {                                // caustics, as strong as the sun or moon is bright',
+    '    float ck = mix(1.0, 0.3, z) * exp(-(p.y - uLevel) / 140.0) * clamp(dot(uSunCol, vec3(0.4)), 0.25, 1.0) * (1.0 - 0.6 * uOvercast);',
+    '    col *= 1.0 - 0.38 * ck + 0.62 * ck * caustic(vec2(p.x * 0.011, p.y * 0.006 + p.x * 0.002));',
+    '  }',
+    '  col *= L;',
+    '  if (isStyle(5.0)) col = mix(uPaper, uInk, ink);',
     '  gl_FragColor = vec4(col, z);',
     '}'
   ].join('\n');
@@ -588,7 +699,7 @@
     'varying vec2 vUv;',
     'uniform sampler2D uScene; uniform float uUnit; uniform float uReflect; uniform float uFoam; uniform float uPxU;',
     'void main() {',
-    '  vec2 p = vec2(vUv.x, 1.0 - vUv.y) * uView;',
+    '  vec2 p = viewPos(vUv);',
     '  float hs = surf(p.x), ys = uLevel - hs, d = p.y - ys;',
     '  vec4 a = texture2D(uScene, vUv);',
     '  if (d < 0.0) { gl_FragColor = vec4(a.rgb, (uScenery > 0.5 || a.a < 0.9) ? 1.0 : 0.0); return; }',
@@ -605,7 +716,8 @@
     '  vec3 lightLeft = exp(-uSigma * dm * 0.3);                            // sunlight left at this depth',
     '  vec3 T = absorb(0.35 + b.a * 14.0, uSigma);                          // through the water to what is behind',
     '  float lm = qz(1.0 - exp(-dm / 3.2));',
-    '  vec3 scat = lm < 0.5 ? mix(uShallow * 0.9, uDeep, lm * 2.0) : mix(uDeep, uDeep * 0.6, lm * 2.0 - 1.0);   // lighter near the top, darker deep down',
+    '  vec3 scat = (lm < 0.5 ? mix(uShallow * 0.9, uDeep, lm * 2.0) : mix(uDeep, uDeep * 0.6, lm * 2.0 - 1.0)) * uLight;   // lighter near the top, darker deep down',
+    '  vec3 foamC = uFoamCol * uLight;',
     '  vec3 col = b.rgb * lightLeft * T + scat * (1.0 - T);',
     '  if (uScenery < 0.5) { col = scat; }',
     '  float sh = texture2D(uDetail, vec2((p.x + p.y * 0.42) * 0.0026 + uTime * 0.0035, 0.37)).g;   // light shafts',
@@ -619,17 +731,19 @@
     '    col = mix(col, texture2D(uScene, toUv(m)).rgb * 0.95, uBands > 0.5 ? band(k, 3.0) : k);',
     '  }',
     '  float line = 1.0 - smoothstep(uPxU * 0.8, uPxU * 1.8, d);           // the surface seen from just below',
-    '  col = mix(col, mix(uShallow, uFoamCol, 0.75), line * 0.85);',
-    '  if (smoothStyle()) col += uShallow * 0.16 * exp(-d / 6.0);',
-    '  else col = mix(col, mix(uShallow, uFoamCol, 0.35), (1.0 - step(uPxU * 3.0, d)) * step(uPxU * 1.5, d));',
+    '  vec3 win = mix(uShallow * uLight, uSkyHor, 0.3);                    // the surface seen from below holds a little sky',
+    '  col = mix(col, mix(win, uFoamCol * uLight, 0.7), line * 0.85);',
+    '  if (smoothStyle()) col += uShallow * uLight * 0.16 * exp(-d / 6.0);',
+    '  else col = mix(col, mix(win, uFoamCol * uLight, 0.35), (1.0 - step(uPxU * 3.0, d)) * step(uPxU * 1.5, d));',
     '  float cap = smoothstep(uRange * 0.12, uRange * 0.35, hs) + smoothstep(1.2, 2.8, abs(slope));',
     '  float lace = texture2D(uWaterTex, vec2(p.x * 0.012 + uTime * 0.01, p.y * 0.02)).a;',
     '  float foam = thr(cap * (0.4 + 0.8 * lace), 0.45, 0.1) * (1.0 - smoothstep(2.0, 6.0, d)) * uFoam;',
-    '  col = mix(col, uFoamCol, foam);',
+    '  col = mix(col, foamC, foam);',
     '  vec2 bq = vec2(p.x * 0.06, p.y * 0.06 + uTime * 0.9), bi = floor(bq);   // a few bubbles drifting up',
     '  vec2 bc = fract(bq) - 0.5 - vec2(0.18 * sin(uTime * 2.0 + bi.y * 1.7), 0.0);',
     '  float bub = step(0.975, hash(bi)) * (1.0 - smoothstep(0.06, 0.11, length(bc))) * smoothstep(6.0, 14.0, d);',
-    '  col = mix(col, mix(col, uFoamCol, 0.7), bub);',
+    '  col = mix(col, mix(col, foamC, 0.7), bub);',
+    '  if (uGlow > 0.01) col += uGlowCol * uGlow * (foam * 0.9 + bub * 0.7 + line * 0.35 + cap * 0.25 * (1.0 - smoothstep(0.0, 9.0, d))) * (0.75 + 0.25 * sin(uTime * 2.7 + p.x * 0.05));',
     '  if (isStyle(5.0)) {',
     '    float vis = clamp(dot(T * lightLeft, vec3(0.333)) * 1.3, 0.0, 1.0);',
     '    col = mix(uPaper, b.rgb, vis);',
@@ -649,6 +763,11 @@
   var TOP_COMMON = [
     'uniform sampler2D uMap; uniform vec2 uWorld; uniform vec4 uViewRect;',
     'float elev(vec2 w) { return texture2D(uMap, w / uWorld).r * 16.0 - 12.0; }',
+    // small-scale wiggle on the coast, so it stays organic when the camera zooms in past the map resolution
+    'float coast(vec2 w, float E) {',
+    '  if (abs(E) > 0.9) return E;                                        // open water and inland: no extra texture reads',
+    '  return E + ((tnoise(w * 0.33) - 0.5) * 0.22 + (tnoise(w * 1.07) - 0.5) * 0.09) * (1.0 - smoothstep(0.25, 0.9, abs(E)));',
+    '}',
     'vec2 facetPos(vec2 w, out float facet) {                             // low poly: everything sampled at triangle centres',
     '  facet = 0.0;',
     '  if (!isStyle(3.0)) return w;',
@@ -665,7 +784,7 @@
     '  float facet;',
     '  vec2 w = facetPos(uViewRect.xy + vec2(vUv.x, 1.0 - vUv.y) * uViewRect.zw, facet);',
     '  vec4 m = texture2D(uMap, w / uWorld);',
-    '  float E = m.r * 16.0 - 12.0, rocky = m.a;',
+    '  float E = coast(w, m.r * 16.0 - 12.0), rocky = m.a;',
     '  float gx = elev(w + vec2(0.7, 0.0)) - elev(w - vec2(0.7, 0.0)), gy = elev(w + vec2(0.0, 0.7)) - elev(w - vec2(0.0, 0.7));',
     '  vec3 N = normalize(vec3(-gx, 1.0, -gy) * vec3(E > 0.0 ? 2.6 : 1.1, 1.0, E > 0.0 ? 2.6 : 1.1));',
     '  float diff = max(dot(N, uSunDir), 0.0);',
@@ -728,14 +847,14 @@
   // ---- 2D top down, pass 2: the water over it --------------------------------------------
   var FS_TOP_WATER = TOP_COMMON + [
     'varying vec2 vUv;',
-    'uniform sampler2D uBed; uniform sampler2D uSim; uniform vec2 uSimSize; uniform float uFoam; uniform float uWindAmt;',
+    'uniform sampler2D uBed; uniform sampler2D uSim; uniform vec2 uSimSize; uniform float uFoam; uniform float uWindAmt; uniform float uStarCell;',
     'float simH(vec2 uv) { return texture2D(uSim, uv).r * 2.0 - 1.0; }',
     'void main() {',
     '  float facet;',
     '  vec2 w = facetPos(uViewRect.xy + vec2(vUv.x, 1.0 - vUv.y) * uViewRect.zw, facet);',
     '  vec2 uvm = w / uWorld;',
     '  vec4 m = texture2D(uMap, uvm);',
-    '  float E = m.r * 16.0 - 12.0, dW = m.g * 24.0;',
+    '  float E = coast(w, m.r * 16.0 - 12.0), dW = m.g * 24.0;',
     '  vec2 e = 1.0 / uSimSize;',
     '  float rip = simH(uvm);',
     '  float hx = simH(uvm + vec2(e.x, 0.0)) - simH(uvm - vec2(e.x, 0.0)), hy = simH(uvm + vec2(0.0, e.y)) - simH(uvm - vec2(0.0, e.y));',
@@ -754,12 +873,13 @@
     '    return;',
     '  }',
     '  float depth = level - E;',
-    '  vec3 N = normalize(vec3(-hx * 2.6 + rp.x * 0.5, 1.0, -hy * 2.6 + rp.y * 0.5));',
+    '  vec3 rr = rainRings(w * 0.32);',
+    '  vec3 N = normalize(vec3(-hx * 2.6 + rp.x * 0.5 + rr.x * 1.6, 1.0, -hy * 2.6 + rp.y * 0.5 + rr.y * 1.6));',
     '  vec4 b = texture2D(uBed, toUv(w + N.xz * min(depth, 6.0) * 0.3));    // the bottom, bent by the surface',
     '  if (b.a < 0.001) b = bed;',
     '  vec3 T = absorb(max(level + b.a * 12.0, depth * 0.5) * 1.55, uSigma);',
-    '  col = b.rgb * T + scatterColor(max(level + b.a * 12.0, depth * 0.5) * 1.55) * (1.0 - T);',
-    '  vec3 sky = mix(uSkyTop, vec3(1.0), smoothstep(0.5, 0.8, cl) * 0.8);',
+    '  col = b.rgb * T + scatterColor(max(level + b.a * 12.0, depth * 0.5) * 1.55) * uLight * (1.0 - T);',
+    '  vec3 sky = mix(uSkyTop, uLight, smoothstep(0.5 - 0.2 * uOvercast, 0.8 - 0.2 * uOvercast, cl) * 0.8);',
     '  col = mix(col, sky, qz(clamp(0.06 + (1.0 - N.y) * 2.5, 0.0, 0.5)));',
     '  float spec = pow(max(dot(N, normalize(uSunDir + vec3(0.0, 1.0, 0.0))), 0.0), 240.0);',
     '  col += uSunCol * (uCrisp > 0.5 ? step(0.6, spec) : spec * 1.5);',
@@ -768,7 +888,10 @@
     '  float churn = smoothstep(0.16, 0.5, abs(rip));',
     '  float fm = max(max(edgeF * 1.3, bands * 0.9), churn) * uFoam;',
     '  float foam = thr(fm * (0.45 + 0.85 * lace), 0.5, 0.12);',
-    '  col = mix(col, uFoamCol * (0.9 + 0.1 * N.y), foam);',
+    '  if (uStars > 0.01) col += vec3(0.9, 0.93, 1.0) * starAt((w + N.xz * 5.0) / uStarCell) * uStars * 0.8;   // stars in the water',
+    '  col += uFoamCol * uLight * rr.z * 0.2;',
+    '  col = mix(col, uFoamCol * uLight * (0.9 + 0.1 * N.y), foam);',
+    '  if (uGlow > 0.01) col += uGlowCol * uGlow * (max(max(edgeF * 0.8, bands * 0.6), churn) * (0.35 + 0.9 * lace) + rr.z * 0.45) * (0.75 + 0.25 * sin(uTime * 2.7 + lace * 9.0));',
     '  if (isStyle(5.0)) {',
     '    col = mix(uPaper, b.rgb, clamp(dot(T, vec3(0.333)) * 1.1, 0.0, 1.0));',
     '    float ink = 0.0;',
@@ -836,6 +959,7 @@
     '  float a = (uZ >= 0.0 || uAA <= 0.0) ? step(d, 0.0) : 1.0 - smoothstep(-uAA, uAA, d);',
     '  if (a < (uZ >= 0.0 ? 0.5 : 0.01)) discard;',
     '  float line = smoothstep(-0.16, -0.06, d);',
+    '  if (k < 4.5 || k > 5.5) col = moodTint(col) * uLight;',
     '  if (isStyle(5.0)) col = mix(uPaper, uInk, max(line, k > 4.5 && k < 5.5 ? 0.0 : hatch(0.45, gl_FragCoord.xy) * 0.35));',
     '  else if (isStyle(1.0) && (k < 4.5 || k > 5.5)) col = mix(col, vec3(0.06, 0.08, 0.14), line);',
     '  gl_FragColor = vec4(col, uZ >= 0.0 ? uZ : a);',
@@ -867,6 +991,27 @@
     '    c = (b < t) ? c2 : c1;',
     '  }',
     '  gl_FragColor = vec4(c, src.a);',
+    '}'
+  ].join('\n');
+  var FS_RAIN = [
+    'varying vec2 vUv;',
+    'uniform vec2 uRes; uniform vec2 uRainDir; uniform float uRainLen; uniform float uRainAmt; uniform vec4 uRainCol; uniform float uT;',
+    'float h21(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
+    'float layer(vec2 px, float spacing, float len, float speed, float seed) {',
+    '  vec2 perp = vec2(-uRainDir.y, uRainDir.x);',
+    '  float a = dot(px, uRainDir), c = dot(px, perp) / spacing, col = floor(c);',
+    '  float cx = abs(fract(c) - 0.5) * spacing;                           // pixels from the middle of this column',
+    '  float period = len * 3.0 + 10.0;',
+    '  float y = a - uT * speed + h21(vec2(col, seed)) * period;',
+    '  float k = floor(y / period), f = y - k * period;',
+    '  if (h21(vec2(col * 1.7 + k, seed + 3.0)) > uRainAmt) return 0.0;',
+    '  float d = period * (0.3 + 0.4 * h21(vec2(k, col + seed))) - f;     // distance behind the head of the drop',
+    '  return step(0.0, d) * step(d, len) * (1.0 - d / len) * (1.0 - smoothstep(0.35, 0.85, cx));',
+    '}',
+    'void main() {',
+    '  vec2 px = vec2(vUv.x, 1.0 - vUv.y) * uRes;                           // low-res pixels, y down',
+    '  float r = layer(px, 7.0, uRainLen, uRes.y * 1.8, 1.0) * 0.6 + layer(px, 11.0, uRainLen * 1.6, uRes.y * 2.5, 2.0) + layer(px, 5.0, uRainLen * 0.6, uRes.y * 1.25, 3.0) * 0.4;',
+    '  gl_FragColor = vec4(uRainCol.rgb, clamp(r, 0.0, 1.0) * uRainCol.a);',
     '}'
   ].join('\n');
   var FS_BLIT = [
@@ -936,19 +1081,26 @@
     var gl = canvas.getContext('webgl', attrs) || canvas.getContext('experimental-webgl', attrs);
     if (!gl) throw new Error('WebGL is not available');
     this.gl = gl;
-    this.deriv = !!gl.getExtension('OES_standard_derivatives');
     this.opts = {};
     for (var k in DEFAULTS) this.opts[k] = DEFAULTS[k];
     this.time = 0;
     this.cam = { yaw: 1.32, pitch: 0.3, dist: 34, target: [0, 0, -5], fov: 55 * Math.PI / 180, auto: true };
     this.floaters = []; this.drops = []; this.trail = []; this.fish = [];
     this.input = { up: false, down: false, left: false, right: false };
-    this.stats = { lowW: 0, lowH: 0, px: 1 };
+    this.camera2d = { x: 0, y: 0, follow: null };          // 2D views: centre of the view in world units; follow: any { x, y }
+    this.stats = { lowW: 0, lowH: 0, px: 1, fps: 0, scale: 1 };
+    this._ev = {};
     this._initGL();
+    var self = this;
+    // phones and some drivers drop the GPU context (tab in background, driver reset); rebuild everything from CPU copies
+    this._onLost = function (e) { e.preventDefault(); self._emit('contextlost', {}); };
+    this._onRestored = function () { self._restore(); self._emit('contextrestored', {}); };
+    canvas.addEventListener('webglcontextlost', this._onLost, false);
+    canvas.addEventListener('webglcontextrestored', this._onRestored, false);
     this.setOptions(opts);
   }
   WaterLite.PALETTES = PALETTES; WaterLite.STYLES = STYLES; WaterLite.QUALITY = QUALITY; WaterLite.THEMES = THEMES; WaterLite.DEFAULTS = DEFAULTS;
-  WaterLite.version = '2.0.0';
+  WaterLite.version = '2.1.0';
   WaterLite._genTextures = genTextures;   // exposed for tools and tests
 
   WaterLite.prototype._prog = function (vs, fsBody, name, raw) {
@@ -968,26 +1120,38 @@
     return { p: p, loc: function (n) { if (!(n in locs)) locs[n] = gl.getUniformLocation(p, n); return locs[n]; }, attr: function (n) { return gl.getAttribLocation(p, n); } };
   };
 
+  // shader programs are compiled the first time a view needs them, so a game that only uses
+  // the top view never pays for the 3D shaders
+  var PROGRAMS = {
+    sky: function () { return [VS_QUAD, FS_SKY, 'sky']; },
+    world: function () { return [VS_WORLD, FS_WORLD, 'world']; },
+    sea: function () { return [VS_SEA, FS_SEA, 'sea']; },
+    sideBg: function () { return [VS_QUAD, FS_SIDE_BG, 'side background']; },
+    sideWater: function () { return [VS_QUAD, FS_SIDE_WATER, 'side water']; },
+    topBed: function () { return [VS_QUAD, FS_TOP_BED, 'top seabed']; },
+    topWater: function () { return [VS_QUAD, FS_TOP_WATER, 'top water']; },
+    sprite: function () { return [VS_SPRITE, FS_SPRITE, 'sprite']; },
+    rain: function () { return [VS_QUAD, FS_RAIN, 'rain']; },
+    quant: function () { return [VS_QUAD, FS_QUANT, 'quantize', true]; },
+    blit: function () { return [VS_QUAD, FS_BLIT, 'blit', true]; }
+  };
+  var TEXTURES = null;                                     // generated once per page, shared by every instance
   WaterLite.prototype._initGL = function () {
-    var gl = this.gl;
-    this.prog = {
-      sky: this._prog(VS_QUAD, FS_SKY, 'sky'),
-      world: this._prog(VS_WORLD, FS_WORLD, 'world'),
-      sea: this._prog(VS_SEA, FS_SEA, 'sea'),
-      sideBg: this._prog(VS_QUAD, FS_SIDE_BG, 'side background'),
-      sideWater: this._prog(VS_QUAD, FS_SIDE_WATER, 'side water'),
-      topBed: this._prog(VS_QUAD, FS_TOP_BED, 'top seabed'),
-      topWater: this._prog(VS_QUAD, FS_TOP_WATER, 'top water'),
-      sprite: this._prog(VS_SPRITE, FS_SPRITE, 'sprite'),
-      quant: this._prog(VS_QUAD, FS_QUANT, 'quantize', true),
-      blit: this._prog(VS_QUAD, FS_BLIT, 'blit', true)
-    };
+    var gl = this.gl, self = this;
+    this.deriv = !!gl.getExtension('OES_standard_derivatives');
+    this._progs = {};
+    this.prog = {};
+    Object.keys(PROGRAMS).forEach(function (k) {
+      Object.defineProperty(self.prog, k, { enumerable: true, configurable: true, get: function () {
+        return self._progs[k] || (self._progs[k] = self._prog.apply(self, PROGRAMS[k]()));
+      } });
+    });
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     this.tex = {}; this.fbos = {};
-    var T = genTextures(1);
+    var T = TEXTURES || (TEXTURES = genTextures(1));
     this.texData = T;
     this.tex.water = this._repeatTex(T.water, T.size);
     this.tex.detail = this._repeatTex(T.detail, T.size);
@@ -1046,33 +1210,71 @@
     for (k in this.opts) prev[k] = this.opts[k];
     for (k in o) if (o[k] !== undefined && k in DEFAULTS) this.opts[k] = o[k];
     var op = this.opts, st = STYLES[op.style] || STYLES.realistic, th = THEMES[op.style] || THEMES.realistic, c = op.colors || {};
+    var M = MOODS[op.mood] || MOODS.day, ink = st.id === 5, rain = op.rain >= 0 ? clamp(+op.rain, 0, 1) : (M.rain || 0);
     this.style = st;
     this.colors = {};
     for (k in th) this.colors[k] = hex(c[k] || th[k]);
+    var C = this.colors;
+    C.glow = hex(c.glow || '#3ff2d8');
+    function mixc(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+    function grey(a, t) { var l = a[0] * 0.3 + a[1] * 0.59 + a[2] * 0.11; return mixc(a, [l, l, l], t); }
+    var light = M.light.slice(), soft = PALETTES[op.palette === 'auto' ? st.palette : op.palette] ? (M.soft || 0) : 0;
+    // a fixed palette has few dark colours: keep the mood gentler so dark scenes land on them instead of dithering between them
+    light = light.map(function (v) { return v + (1 - v) * soft; });
+    if (ink) {                                             // ink keeps its look: paper and ink change with the mood
+      if (M.paper && !c.paper) C.paper = hex(M.paper);
+      if (M.ink && !c.ink) C.ink = hex(M.ink);
+      light = [1, 1, 1];
+    } else {
+      var skyMid = mixc(C.skyTop, C.skyHorizon, 0.5);
+      if (M.skyTop && !c.skyTop) C.skyTop = mixc(C.skyTop, hex(M.skyTop), 0.85);
+      if (M.skyHorizon && !c.skyHorizon) C.skyHorizon = mixc(C.skyHorizon, hex(M.skyHorizon), 0.85);
+      C.skyMid = M.skyMid ? mixc(skyMid, hex(M.skyMid), 0.85) : mixc(C.skyTop, C.skyHorizon, 0.5);
+      if (M.moon) C.sun = M.moon.map(function (v) { return v + (1 - v) * soft * 0.9; });
+      else C.sun = [0, 1, 2].map(function (i) { return C.sun[i] * (M.sun[i] + (1 - M.sun[i]) * Math.min(soft * 1.8, 1)); });
+      if (M.desat) ['sand', 'grass', 'rock', 'wood', 'paint'].forEach(function (key) { if (!c[key]) C[key] = grey(C[key], M.desat); });
+      if (rain > 0) {                                      // rain greys the sky and dims the light a little
+        C.skyTop = grey(C.skyTop, rain * 0.5); C.skyHorizon = grey(C.skyHorizon, rain * 0.45); C.skyMid = grey(C.skyMid, rain * 0.48);
+        C.sun = C.sun.map(function (v) { return v * (1 - 0.35 * rain); });
+        light = light.map(function (v) { return v * (1 - 0.18 * rain); });
+      }
+    }
+    if (!C.skyMid) C.skyMid = mixc(C.skyTop, C.skyHorizon, 0.5);
+    this.env = { light: light, stars: ink ? 0 : (M.stars || 0), glow: ink ? 0 : (M.glow || 0), lightning: M.lightning || 0, overcast: Math.max(M.overcast || 0, rain * 0.6), wind: M.wind || 1, desat: ink ? 0 : (M.desat || 0) };
+    this.rainAmt = rain;
     var sh = hex(c.tint || c.shallow || th.tint || th.shallow), cl = Math.max(op.clarity, 0.05);
     this.colors.tint = sh;
-    this.sigma = [0, 1, 2].map(function (i) { return -Math.log(Math.max(sh[i], 0.03)) * 0.24 * (st.murk || 1) / cl; });
+    this.sigma = [0, 1, 2].map(function (i) { return -Math.log(Math.max(sh[i], 0.03)) * 0.24 * (st.murk || 1) * (M.murk || 1) / cl; });
     this.pixelSize = op.pixelSize > 0 ? op.pixelSize : st.pixel;
     this.palName = op.palette === 'auto' ? st.palette : op.palette;
     this.dither = op.dither >= 0 ? op.dither : st.dither;
-    var el = op.sunElevation * Math.PI / 180, az = op.sunAzimuth * Math.PI / 180;
+    var elD = op.sunElevation === DEFAULTS.sunElevation && M.elev !== undefined ? M.elev : op.sunElevation;
+    var azD = op.sunAzimuth === DEFAULTS.sunAzimuth && M.az !== undefined ? M.az : op.sunAzimuth;
+    this.sunElev = elD;
+    var el = elD * Math.PI / 180, az = azD * Math.PI / 180;
     this.sunDir = [Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)];
     this.q = QUALITY[op.quality] || QUALITY.low;
-    var waveKeys = ['quality', 'wind', 'windDir', 'waveHeight', 'choppiness', 'seed'];
+    var waveKeys = ['quality', 'wind', 'windDir', 'waveHeight', 'choppiness', 'seed', 'mood'];
     if (!this.waves || waveKeys.some(function (key) { return prev[key] !== op[key]; })) this._buildWaves();
     var gridKey = op.quality + (op.style === 'lowpoly' ? '/facets' : '');
     if (this._gridKey !== gridKey) { this._gridKey = gridKey; this._buildGrid(op.style === 'lowpoly' ? 46 : this.q.grid); }
     var fresh = !this._ready, modeChanged = prev.mode !== op.mode || fresh, qChanged = prev.quality !== op.quality;
-    if (op.mode === 'side' && (modeChanged || qChanged || prev.floaters !== op.floaters || prev.seed !== op.seed)) this._initSide();
-    if (op.mode === 'top' && (modeChanged || qChanged || prev.seed !== op.seed || prev.land !== op.land || prev.boat !== op.boat || prev.floaters !== op.floaters)) this._initTop();
+    if (op.mode === 'side' && (modeChanged || qChanged || prev.floaters !== op.floaters || prev.seed !== op.seed || prev.worldWidth !== op.worldWidth)) this._initSide();
+    if (op.mode === 'top' && (modeChanged || qChanged || prev.seed !== op.seed || prev.land !== op.land || prev.boat !== op.boat || prev.floaters !== op.floaters || String(prev.mapSize) !== String(op.mapSize))) this._initTop();
     if (op.mode === '3d' && (modeChanged || qChanged || prev.seed !== op.seed || prev.boat !== op.boat || prev.floaters !== op.floaters)) this._initThree();
+    if (modeChanged) {                                     // a fresh 2D camera: the left end of the side world, the middle of the map
+      var cam = this.camera2d;
+      cam.follow = null;
+      if (op.mode === 'side') cam.x = SIDE.W / 2;
+      if (op.mode === 'top') { cam.x = this.top.worldW / 2; cam.y = this.top.worldH / 2; }
+    }
     this._ready = true;
     return this;
   };
 
   // A few Gerstner waves drawn from a Pierson-Moskowitz spectrum for the wind speed.
   WaterLite.prototype._buildWaves = function () {
-    var o = this.opts, n = this.q.waves, R = rng(o.seed * 7919 + 13), U = Math.max(o.wind, 0.5);
+    var o = this.opts, n = this.q.waves, R = rng(o.seed * 7919 + 13), U = Math.max(this._windSpeed(), 0.5);
     var wp = 0.877 * G / U, A = new Float32Array(64), B = new Float32Array(64), alpha = 0.0081;
     var wmin = wp * 0.75, wmax = wp * 4.5, sumA = 0, i;
     this.waves = [];
@@ -1173,22 +1375,25 @@
     // terrain mesh
     var N = q.terrain, S = 400, cx = 0, cz = -30, step = S / (N - 1), H = new Float32Array(N * N), i, j;
     for (j = 0; j < N; j++) for (i = 0; i < N; i++) H[j * N + i] = this._terrainHeight(cx - S / 2 + i * step, cz - S / 2 + j * step);
-    var vtx = new Float32Array(N * N * 6);
+    var vtx = new Float32Array(N * N * 7), DIRS = [[1, 0], [0.7, 0.7], [0, 1], [-0.7, 0.7], [-1, 0], [-0.7, -0.7], [0, -1], [0.7, -0.7]];
+    function hAt(a, b) { return H[clamp(Math.round(b), 0, N - 1) * N + clamp(Math.round(a), 0, N - 1)]; }
     for (j = 0; j < N; j++) for (i = 0; i < N; i++) {
       var hl = H[j * N + Math.max(i - 1, 0)], hr = H[j * N + Math.min(i + 1, N - 1)], hd = H[Math.max(j - 1, 0) * N + i], hu = H[Math.min(j + 1, N - 1) * N + i];
-      var nx = -(hr - hl) / (2 * step), nz = -(hu - hd) / (2 * step), nl = Math.sqrt(nx * nx + 1 + nz * nz), o = (j * N + i) * 6;
-      vtx[o] = cx - S / 2 + i * step; vtx[o + 1] = H[j * N + i]; vtx[o + 2] = cz - S / 2 + j * step;
+      var nx = -(hr - hl) / (2 * step), nz = -(hu - hd) / (2 * step), nl = Math.sqrt(nx * nx + 1 + nz * nz), o = (j * N + i) * 7, h0 = H[j * N + i], occ = 0;
+      for (var dd = 0; dd < 8; dd++) for (var rr = 1; rr <= 4; rr *= 2) {   // how much of the sky the slopes around hide
+        var rise = (hAt(i + DIRS[dd][0] * rr, j + DIRS[dd][1] * rr) - h0) / (rr * step);
+        if (rise > 0) occ += Math.min(rise, 1.5) / rr;
+      }
+      vtx[o] = cx - S / 2 + i * step; vtx[o + 1] = h0; vtx[o + 2] = cz - S / 2 + j * step;
       vtx[o + 3] = nx / nl; vtx[o + 4] = 1 / nl; vtx[o + 5] = nz / nl;
+      vtx[o + 6] = clamp(1 - occ * 0.16, 0.45, 1);
     }
     var idx = new Uint16Array((N - 1) * (N - 1) * 6), n = 0;
     for (j = 0; j < N - 1; j++) for (i = 0; i < N - 1; i++) {
       var i0 = j * N + i, i1 = i0 + 1, i2 = i0 + N, i3 = i2 + 1;
       idx[n++] = i0; idx[n++] = i2; idx[n++] = i1; idx[n++] = i1; idx[n++] = i2; idx[n++] = i3;
     }
-    if (this.terrain) { gl.deleteBuffer(this.terrain.vb); gl.deleteBuffer(this.terrain.ib); gl.deleteBuffer(this.props.buf); }
-    var vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, vtx, gl.STATIC_DRAW);
-    var ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
-    this.terrain = { vb: vb, ib: ib, count: idx.length };
+    this.terrainData = { vtx: vtx, idx: idx, props: null };
     // palms and boulders
     var B = new MeshBuilder();
     isl.forEach(function (c, ii) {
@@ -1205,7 +1410,8 @@
         addRock(B, bx, self._terrainHeight(bx, bz) + 0.2, bz, 0.8 + R() * 1.4, R);
       }
     });
-    this.props = this._upload(B);
+    this.terrainData.props = new Float32Array(B.v);
+    this._uploadTerrain();
     // floating things in the lagoon in front of the camera, each on a slack mooring
     this.floaters = []; this.trail = [];
     if (this.opts.floaters) {
@@ -1217,6 +1423,16 @@
       });
     }
     this.boat3d = this.opts.boat ? { ang: 0.6, radius: 54, speed: 4.2, x: 0, z: 0, y: 0, heading: 0, tilt: [0, 0] } : null;
+  };
+  WaterLite.prototype._uploadTerrain = function () {
+    var gl = this.gl, D = this.terrainData;
+    if (this.terrain) { gl.deleteBuffer(this.terrain.vb); gl.deleteBuffer(this.terrain.ib); }
+    if (this.props) gl.deleteBuffer(this.props.buf);
+    var vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, D.vtx, gl.STATIC_DRAW);
+    var ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, D.idx, gl.STATIC_DRAW);
+    this.terrain = { vb: vb, ib: ib, count: D.idx.length };
+    var pb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.bufferData(gl.ARRAY_BUFFER, D.props, gl.STATIC_DRAW);
+    this.props = { buf: pb, count: D.props.length / 10 };
   };
   WaterLite.prototype._update3d = function (dt) {
     var self = this;
@@ -1277,17 +1493,17 @@
     gl.uniformMatrix4fv(p.loc('uViewProj'), false, VP);
     gl.uniform1f(p.loc('uSnap'), this.style.snap ? 1 : 0); gl.uniform2f(p.loc('uRes'), w, h);
     gl.uniform1f(p.loc('uPass'), pass); gl.uniform1f(p.loc('uFlip'), pass === 2 ? 1 : 0);
-    gl.uniform3fv(p.loc('uCamPos'), eye); gl.uniform1f(p.loc('uFogR'), 420); gl.uniform1f(p.loc('uMaxD'), MAXD);
-    gl.uniform1f(p.loc('uWaveTime'), this.time); gl.uniform1f(p.loc('uWindAmt'), clamp(this.opts.wind / 8, 0.2, 2));
+    gl.uniform3fv(p.loc('uCamPos'), eye); gl.uniform1f(p.loc('uFogR'), this._fogR); gl.uniform1f(p.loc('uMaxD'), MAXD);
+    gl.uniform1f(p.loc('uWaveTime'), this.time); gl.uniform1f(p.loc('uWindAmt'), clamp(this._windSpeed() / 8, 0.2, 2));
     gl.uniform4fv(p.loc('uShadows'), this._shadow3d);
     var pa = 0, pn = p.attr('aNormal'), pc = p.attr('aColor');
     if (scen) {
       gl.uniform1f(p.loc('uIsTerrain'), 1);
       gl.uniformMatrix4fv(p.loc('uModel'), false, IDENTITY);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.terrain.vb);
-      gl.enableVertexAttribArray(pa); gl.vertexAttribPointer(pa, 3, gl.FLOAT, false, 24, 0);
-      if (pn >= 0) { gl.enableVertexAttribArray(pn); gl.vertexAttribPointer(pn, 3, gl.FLOAT, false, 24, 12); }
-      if (pc >= 0) { gl.disableVertexAttribArray(pc); gl.vertexAttrib4f(pc, 0, 0, 0, 0); }
+      gl.enableVertexAttribArray(pa); gl.vertexAttribPointer(pa, 3, gl.FLOAT, false, 28, 0);
+      if (pn >= 0) { gl.enableVertexAttribArray(pn); gl.vertexAttribPointer(pn, 3, gl.FLOAT, false, 28, 12); }
+      if (pc >= 0) { gl.enableVertexAttribArray(pc); gl.vertexAttribPointer(pc, 1, gl.FLOAT, false, 28, 24); }   // ambient occlusion
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.terrain.ib);
       gl.drawElements(gl.TRIANGLES, this.terrain.count, gl.UNSIGNED_SHORT, 0);
     }
@@ -1309,6 +1525,10 @@
   WaterLite.prototype._render3d = function (w, h, A) {
     var gl = this.gl, c = this.cam, C = this.colors, q = this.q, scen = this.opts.scenery;
     var eye = this._eye(), L = lookAt(eye, c.target), VP = mul(persp(c.fov, w / h, 0.5, 1500), L.m);
+    this._fogR = 420 * (1 - 0.45 * this.rainAmt);
+    var pxAng = c.fov / h;                                 // radians per low-res pixel
+    this._starCell = 1 / (7 * pxAng);
+    this._camRight = L.r;
     var sh = new Float32Array(40), n = 0;
     this.floaters.forEach(function (f) { if (n < 10) { sh.set([f.x, f.z, f.size[0] * 0.8, 0.55], n * 4); n++; } });
     if (this.boat3d && n < 9) {
@@ -1327,7 +1547,7 @@
     this._drawWorld(VP, eye, 1, rw, rh);
     // 2. the islands mirrored in the sea
     var FT = null;
-    if (q.refl && this.opts.reflections && scen && this.style.id !== 5) {
+    if (q.refl && this.opts.reflections && scen && this.style.id !== 5 && !(q.auto && this._auto.scale < 0.55)) {
       var fw = Math.max(16, Math.round(w * 0.5)), fh = Math.max(16, Math.round(h * 0.5));
       FT = this._target('refl', fw, fh, gl.LINEAR);
       gl.bindFramebuffer(gl.FRAMEBUFFER, FT.f); gl.viewport(0, 0, fw, fh);
@@ -1342,6 +1562,9 @@
     gl.useProgram(p.p); this._quadAttrib(); this._common(p);
     gl.uniform3fv(p.loc('uRight'), L.r); gl.uniform3fv(p.loc('uUp'), L.u); gl.uniform3fv(p.loc('uFwd'), L.f);
     var ty = Math.tan(c.fov / 2); gl.uniform2f(p.loc('uTan'), ty * w / h, ty);
+    var bo = this._bolt;
+    gl.uniform4f(p.loc('uBolt'), bo ? c.yaw - Math.PI + (bo.pos - 0.5) * 0.9 : 0, 0.42, bo ? bo.seed : 0, bo ? 1 : 0);
+    gl.uniform1f(p.loc('uPxAng'), pxAng); gl.uniform1f(p.loc('uStarCell'), this._starCell);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.enable(gl.DEPTH_TEST);
     this._drawWorld(VP, eye, 0, w, h);
@@ -1359,10 +1582,12 @@
     var isl = new Float32Array(24);
     if (scen) this.islands.forEach(function (o, i) { if (i < 6) isl.set([o.x, o.z, o.r, 0], i * 4); });
     gl.uniform4fv(p.loc('uIslands'), isl);
+    gl.uniform1f(p.loc('uSwash'), scen ? 0.1 * clamp(this._windSpeed() / 8, 0.4, 1.6) * Math.min(this.opts.waveHeight, 2) : 0);
     gl.uniform1f(p.loc('uSnap'), this.style.snap ? 1 : 0); gl.uniform2f(p.loc('uRes'), w, h);
     gl.uniform3fv(p.loc('uCamPos'), eye);
-    gl.uniform1f(p.loc('uFoam'), this.opts.foam); gl.uniform1f(p.loc('uAmp'), this.amp); gl.uniform1f(p.loc('uFogR'), 420); gl.uniform1f(p.loc('uMaxD'), MAXD);
-    gl.uniform1f(p.loc('uDetailAmt'), facets ? 0 : 0.32 * clamp(this.opts.wind / 8, 0.3, 1.6) * (this.style.bands ? 0.7 : 1));
+    gl.uniform1f(p.loc('uFoam'), this.opts.foam); gl.uniform1f(p.loc('uAmp'), this.amp); gl.uniform1f(p.loc('uFogR'), this._fogR); gl.uniform1f(p.loc('uMaxD'), MAXD);
+    gl.uniform1f(p.loc('uDetailAmt'), facets ? 0 : 0.32 * clamp(this._windSpeed() / 8, 0.3, 1.6) * (this.style.bands ? 0.7 : 1));
+    gl.uniform1f(p.loc('uStarCell'), this._starCell);
     var tr = new Float32Array(32);
     for (var i = 0; i < this.trail.length && i < 8; i++) { var t = this.trail[i]; tr.set([t.x, t.z, Math.max(t.life, 0), 1.2 + (1 - t.life) * 2.5], i * 4); }
     gl.uniform4fv(p.loc('uTrail'), tr);
@@ -1372,8 +1597,10 @@
 
   // ---- 2D side view ----------------------------------------------------------------------
   WaterLite.prototype._initSide = function () {
-    var cols = Math.round(this.q.sim * 1.25), gl = this.gl, R = rng(this.opts.seed * 13 + 1);
-    this.side = { cols: cols, h: new Float32Array(cols), v: new Float32Array(cols), viewW: SIDE.W, viewH: 270, level: 148, range: 64, bytes: new Uint8Array(cols * 2) };
+    var worldW = clamp(+this.opts.worldWidth || SIDE.W, SIDE.W, 20000), gl = this.gl, R = rng(this.opts.seed * 13 + 1);
+    var cols = Math.min(Math.round(this.q.sim * 1.25 * worldW / SIDE.W), 2048);
+    this.side = { cols: cols, h: new Float32Array(cols), v: new Float32Array(cols), viewW: SIDE.W, viewH: 270, level: 148, range: 64, bytes: new Uint8Array(cols * 2),
+      worldW: worldW, camX: 0, dockX: worldW - (SIDE.W - SIDE.deckX), posts: SIDE.posts.map(function (x) { return worldW - (SIDE.W - x); }) };
     this.floaters = []; this.drops = []; this.fish = [];
     this._sideView();
     var S = this.side, self = this;
@@ -1382,9 +1609,9 @@
         self.addFloater(d[0] * S.viewW, S.level - 4, { kind: d[1], size: d[2] });
       });
     }
-    var cols2 = [[1.0, 0.55, 0.18], [0.82, 0.88, 0.95], [1.0, 0.86, 0.25], [0.35, 0.65, 1.0]];
-    for (var k = 0; k < 7; k++) {
-      var fx = 80 + R() * 260;
+    var cols2 = [[1.0, 0.55, 0.18], [0.82, 0.88, 0.95], [1.0, 0.86, 0.25], [0.35, 0.65, 1.0]], nf = Math.min(Math.round(7 * worldW / SIDE.W), 60);
+    for (var k = 0; k < nf; k++) {
+      var fx = 80 + R() * (worldW - 220);
       this.fish.push({ x: fx, y: 0, depth: 0.25 + R() * 0.6, vx: (R() < 0.5 ? -1 : 1) * (9 + R() * 12), z: 0.03 + R() * 0.3, size: 14 + R() * 10, ph: R() * 6.28, flee: 0, col: cols2[k % 4] });
     }
     if (this.tex.heights) gl.deleteTexture(this.tex.heights);
@@ -1411,11 +1638,11 @@
     return t;
   };
   WaterLite.prototype._swellAt = function (x, t) {
-    var o = this.opts, a = Math.min(o.wind / 10, 2.2) * o.waveHeight;
+    var o = this.opts, a = Math.min(this._windSpeed() / 10, 2.2) * o.waveHeight;
     return a * (3.2 * Math.sin(x * 0.021 - t * 1.25) + 1.6 * Math.sin(x * 0.047 + t * 1.9 + 1.3) + 0.8 * Math.sin(x * 0.11 - t * 3.1 + 0.4));
   };
   WaterLite.prototype._sideCol = function (arr, x) {
-    var S = this.side, u = clamp(x / S.viewW, 0, 1) * (S.cols - 1), i = Math.floor(u), f = u - i, j = Math.min(i + 1, S.cols - 1);
+    var S = this.side, u = clamp(x / S.worldW, 0, 1) * (S.cols - 1), i = Math.floor(u), f = u - i, j = Math.min(i + 1, S.cols - 1);
     return arr[i] * (1 - f) + arr[j] * f;
   };
   WaterLite.prototype._sideHeight = function (x) { return this._sideCol(this.side.h, x) + this._swellAt(x, this.time); };
@@ -1465,13 +1692,13 @@
       f.flee = Math.max(0, f.flee - dt);
       var speed = f.vx * (1 + f.flee * 2.2);
       f.x += speed * dt;
-      var lo = self._cliffX(f.y) + 14, hi = SIDE.posts[0] - 12;
+      var lo = self._cliffX(f.y) + 14, hi = S.posts[0] - 12;
       if (f.x < lo) { f.x = lo; f.vx = Math.abs(f.vx); }
       if (f.x > hi) { f.x = hi; f.vx = -Math.abs(f.vx); }
     });
     var B = S.bytes;
     for (i = 0; i < n; i++) {
-      var x = i / (n - 1) * S.viewW, val = Math.round(clamp(((h[i] + this._swellAt(x, this.time)) / S.range * 0.5 + 0.5) * 65535, 0, 65535));
+      var x = i / (n - 1) * S.worldW, val = Math.round(clamp(((h[i] + this._swellAt(x, this.time)) / S.range * 0.5 + 0.5) * 65535, 0, 65535));
       B[i * 2] = val >> 8; B[i * 2 + 1] = val & 255;
     }
     var gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, this.tex.heights);
@@ -1504,16 +1731,16 @@
     f.vx *= 1 - 0.05 * dt; f.av *= 1 - 0.3 * dt;
     f.x += f.vx * dt; f.y += f.vy * dt; f.a += f.av * dt;
     if (frac > 0 && frac < 0.98 && Math.abs(f.vy) > 20) this._push(f.x, -f.vy * dt * 0.06, w * 0.8);
-    var hw = w * 0.5, left = this.opts.scenery ? this._cliffX(f.y) + hw : hw, right = this.opts.scenery ? SIDE.posts[0] - 3.5 - hw : S.viewW - hw;
+    var hw = w * 0.5, left = this.opts.scenery ? this._cliffX(f.y) + hw : hw, right = this.opts.scenery ? S.posts[0] - 3.5 - hw : S.worldW - hw;
     if (f.x < left) { f.x = left; f.vx = Math.abs(f.vx) * 0.4; }
     if (f.x > right) { f.x = right; f.vx = -Math.abs(f.vx) * 0.4; }
     var floor = this._sideBottom(f.x) - H * 0.35;
     if (f.y > floor) { f.y = floor; f.vy = Math.min(f.vy, 0); }
   };
   WaterLite.prototype._push = function (x, amount, radius) {
-    var S = this.side, n = S.cols, i0 = Math.max(0, Math.floor((x - radius) / S.viewW * (n - 1))), i1 = Math.min(n - 1, Math.ceil((x + radius) / S.viewW * (n - 1)));
+    var S = this.side, n = S.cols, i0 = Math.max(0, Math.floor((x - radius) / S.worldW * (n - 1))), i1 = Math.min(n - 1, Math.ceil((x + radius) / S.worldW * (n - 1)));
     for (var i = i0; i <= i1; i++) {
-      var d = Math.abs(i / (n - 1) * S.viewW - x);
+      var d = Math.abs(i / (n - 1) * S.worldW - x);
       if (d < radius) S.v[i] += amount * (1 - d / radius) * 60;
     }
   };
@@ -1526,6 +1753,9 @@
   };
   WaterLite.prototype._renderSide = function (w, h, A) {
     var gl = this.gl, S = this.side, C = this.colors, self = this;
+    S.camX = clamp(this.camera2d.x - S.viewW / 2, 0, S.worldW - S.viewW);
+    if (this.stats.px > 1) { var upp = S.viewW / w; S.camX = Math.round(S.camX / upp) * upp; }
+    var rect = [S.camX, 0, S.viewW, S.viewH];
     this._unbindPassTextures();
     var Lr = this._target('layer', w, h, gl.LINEAR);
     gl.bindFramebuffer(gl.FRAMEBUFFER, Lr.f); gl.viewport(0, 0, w, h);
@@ -1533,8 +1763,12 @@
     var p = this.prog.sideBg;
     gl.useProgram(p.p); this._quadAttrib(); this._common(p); this._sideUniforms(p);
     gl.uniform4f(p.loc('uCliff'), SIDE.cliff[0], SIDE.cliff[1], SIDE.cliff[2], S.level - 62);
-    gl.uniform4f(p.loc('uDock'), SIDE.deckX, S.level - 34, 6, 3.5);
-    gl.uniform3f(p.loc('uPosts'), SIDE.posts[0], SIDE.posts[1], SIDE.posts[2]);
+    gl.uniform4f(p.loc('uDock'), S.dockX, S.level - 34, 6, 3.5);
+    gl.uniform3f(p.loc('uPosts'), S.posts[0], S.posts[1], S.posts[2]);
+    gl.uniform2f(p.loc('uSunPos'), S.viewW * 0.74, S.level * (0.92 - 0.62 * clamp(this.sunElev / 42, 0, 1.4)));
+    var bo = this._bolt, upp2 = S.viewW / w;
+    gl.uniform4f(p.loc('uBolt'), bo ? S.viewW * (0.1 + 0.8 * bo.pos) : 0, S.level, bo ? bo.seed : 0, bo ? 1 : 0);
+    gl.uniform1f(p.loc('uPxU'), upp2); gl.uniform1f(p.loc('uStarCell'), 7 * upp2);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     // floating things and fish go into the same layer, so the water bends and tints them
     var list = this.fish.map(function (f) {
@@ -1545,7 +1779,7 @@
       var col = f.kind === 'duck' ? [1, 0.84, 0.18] : f.kind === 'boat' ? C.paint : f.kind === 'barrel' ? [C.wood[0] * 0.8, C.wood[1] * 0.8, C.wood[2] * 0.85] : C.wood;
       list.push({ x: f.x + s * cy, y: f.y - c * cy, w: f.w, h: f.h, a: f.a, kind: { crate: 0, barrel: 1, duck: 2, boat: 3 }[f.kind], color: col, color2: [0.18, 0.18, 0.2], z: 0.03 });
     });
-    this._sprites([0, 0, S.viewW, S.viewH], w, list, true);
+    this._sprites(rect, w, list, true);
     gl.bindFramebuffer(gl.FRAMEBUFFER, A.f); gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     p = this.prog.sideWater;
@@ -1554,13 +1788,15 @@
     gl.uniform1f(p.loc('uUnit'), SIDE.unit); gl.uniform1f(p.loc('uReflect'), this.opts.reflections && this.opts.scenery ? (this.style.id === 5 ? 0 : 0.32) : 0);
     gl.uniform1f(p.loc('uFoam'), this.opts.foam); gl.uniform1f(p.loc('uPxU'), S.viewW / w);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-    var drops = this.drops.map(function (d) { return { x: d.x, y: d.y, w: d.r, h: d.r, a: 0, kind: 5, color: self.style.id === 5 ? C.paper : C.foam }; });
-    this._sprites([0, 0, S.viewW, S.viewH], w, drops, false);
+    var Fc = this._fc, gw = this.env.glow, sprayC = this.style.id === 5 ? C.paper : [0, 1, 2].map(function (i) { return C.foam[i] * Fc.light[i] * (1 - gw * 0.6) + C.glow[i] * gw * 0.8; });
+    var drops = this.drops.map(function (d) { return { x: d.x, y: d.y, w: d.r, h: d.r, a: 0, kind: 5, color: sprayC }; });
+    this._sprites(rect, w, drops, false);
   };
   WaterLite.prototype._sideUniforms = function (p) {
     var gl = this.gl, S = this.side;
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.tex.heights); gl.uniform1i(p.loc('uHeights'), 1);
     gl.uniform1f(p.loc('uCols'), S.cols); gl.uniform2f(p.loc('uView'), S.viewW, S.viewH); gl.uniform1f(p.loc('uLevel'), S.level); gl.uniform1f(p.loc('uRange'), S.range);
+    gl.uniform1f(p.loc('uWorldW'), S.worldW); gl.uniform1f(p.loc('uCamX'), S.camX);
   };
   // 2D sprites; with zLayer they are drawn hard-edged and write their distance into alpha
   WaterLite.prototype._sprites = function (rect, lowW, list, zLayer) {
@@ -1602,13 +1838,17 @@
     return d;
   }
   WaterLite.prototype._initTop = function () {
-    var W = this.q.sim, H = Math.round(W * 9 / 16), N = W * H, cell = W / 160, seed = this.opts.seed, R = rng(seed * 31 + 5), L = this.opts.land, x, y, i, k;
+    var ms = this.opts.mapSize || [], mw = clamp(+ms[0] || 160, 40, 2000), mh = clamp(+ms[1] || 90, 40, 2000), area = mw * mh / 14400;
+    // the ripple grid keeps the quality's density up to 4x the cells of the standard map, then gets coarser
+    var cell = Math.min(this.q.sim / 160, Math.sqrt(this.q.sim * this.q.sim * 9 / 16 * 4 / (mw * mh)));
+    var W = Math.round(mw * cell), H = Math.round(mh * cell), N = W * H, seed = this.opts.seed, R = rng(seed * 31 + 5), L = this.opts.land, x, y, i, k;
+    cell = W / mw;
     var raw = new Float32Array(N);
     if (typeof L === 'function') {
       for (y = 0; y < H; y++) for (x = 0; x < W; x++) { var lv = L((x + 0.5) / W, (y + 0.5) / H); raw[y * W + x] = lv === true ? 0.5 : (+lv || 0); }
     } else if (L !== 'none') {
-      var isl = [], count = 3 + Math.floor(R() * 2);
-      for (k = 0; k < count; k++) isl.push({ x: (0.14 + 0.72 * R()) * 160, y: (0.15 + 0.6 * R()) * 90, r: (0.07 + 0.11 * R()) * 160 });
+      var isl = [], count = Math.max(1, Math.round((3 + Math.floor(R() * 2)) * area));
+      for (k = 0; k < count; k++) isl.push({ x: (0.14 + 0.72 * R()) * mw, y: (0.15 + 0.6 * R()) * mh, r: (0.07 + 0.11 * R()) * 160 });
       for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
         var gx = x / cell, gy = y / cell, e = 0;
         var wx = gx + (vnoise(gx * 0.05, gy * 0.05, seed) - 0.5) * 14, wy = gy + (vnoise(gx * 0.05 + 9, gy * 0.05, seed) - 0.5) * 14;
@@ -1638,8 +1878,8 @@
       else E[i] = -(0.36 * wd + 6.2 * smooth(4.5, 16, wd)) + (vnoise(gx2 * 0.09, gy2 * 0.09, seed + 5) - 0.5) * 0.9 * smooth(1, 3, wd);
     }
     if (typeof L !== 'function' && L !== 'none') {
-      for (k = 0, i = 0; k < 8 && i < 400; i++) {
-        var rx = 4 + R() * 152, ry = 4 + R() * 82, ci = Math.floor(ry * cell) * W + Math.floor(rx * cell), wdd = dW[ci] / cell;
+      for (k = 0, i = 0; k < Math.round(8 * area) && i < 400 * area; i++) {
+        var rx = 4 + R() * (mw - 8), ry = 4 + R() * (mh - 8), ci = Math.floor(ry * cell) * W + Math.floor(rx * cell), wdd = dW[ci] / cell;
         if (mask[ci] || wdd < 2.5 || wdd > 9) continue;
         var rr = (1.1 + R() * 2.0) * cell, top = -1.7 + R() * 2.0, cxr = rx * cell, cyr = ry * cell;
         for (y = Math.max(0, Math.floor(cyr - rr * 1.5)); y <= Math.min(H - 1, Math.ceil(cyr + rr * 1.5)); y++) for (x = Math.max(0, Math.floor(cxr - rr * 1.5)); x <= Math.min(W - 1, Math.ceil(cxr + rr * 1.5)); x++) {
@@ -1658,42 +1898,50 @@
       map[i * 4 + 2] = Math.round(clamp(dL[i] / cell / 12, 0, 1) * 255);
       map[i * 4 + 3] = Math.round(rocky[i] * 255);
     }
-    var gl = this.gl;
-    if (this.tex.map) { gl.deleteTexture(this.tex.map); gl.deleteTexture(this.tex.sim); }
-    this.tex.map = this._dataTex(W, H, gl.LINEAR);
-    gl.bindTexture(gl.TEXTURE_2D, this.tex.map); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, map);
-    this.tex.sim = this._dataTex(W, H, gl.LINEAR, gl.LUMINANCE);
-    this.top = { W: W, H: H, cell: cell, worldW: 160, worldH: 90, mask: mask, shore: dW, E: E, cur: new Float32Array(N), prev: new Float32Array(N), bytes: new Uint8Array(N), acc: 0 };
+    this.top = { W: W, H: H, cell: cell, worldW: mw, worldH: mh, mask: mask, shore: dW, E: E, cur: new Float32Array(N), prev: new Float32Array(N), bytes: new Uint8Array(N), acc: 0, mapBytes: map };
+    this._uploadTopMap();
     this.floaters = []; this.drops = []; this.fish = [];
-    this.topBoat = null;
+    var oldBoat = this.topBoat;
+    this.topBoat = null; this._rect = null;
     if (this.opts.boat) {
       var best = null, bd = -1;
-      for (k = 0; k < 60; k++) { var cx = 20 + R() * 120, cy = 50 + R() * 35, dd = this._shoreDist(cx, cy); if (dd > bd) { bd = dd; best = [cx, cy]; } }
+      for (k = 0; k < 60; k++) { var cx = mw * (0.125 + R() * 0.75), cy = mh * (0.55 + R() * 0.39), dd = this._shoreDist(cx, cy); if (dd > bd) { bd = dd; best = [cx, cy]; } }
       this.topBoat = this.addFloater(best[0], best[1], { kind: 'boat', size: 9 });
       this.topBoat.heading = -Math.PI / 2; this.topBoat.speed = 0; this.topBoat.auto = true;
     }
+    if (oldBoat && this.camera2d.follow === oldBoat) this.camera2d.follow = this.topBoat;
     if (this.opts.floaters) {
-      for (k = 0; k < 7; k++) {
+      for (k = 0; k < Math.min(Math.round(7 * area), 30); k++) {
         var tx = 0, ty = 0, tries = 0;
-        do { tx = 8 + R() * 144; ty = 8 + R() * 74; tries++; } while ((this._shoreDist(tx, ty) < 2 || this._shoreDist(tx, ty) > 9) && tries < 80);
+        do { tx = 8 + R() * (mw - 16); ty = 8 + R() * (mh - 16); tries++; } while ((this._shoreDist(tx, ty) < 2 || this._shoreDist(tx, ty) > 9) && tries < 80);
         this.addFloater(tx, ty, { kind: k % 3 === 2 ? 'barrel' : 'crate', size: 2.6 + R() * 0.8, angle: R() * 6 });
       }
-      for (k = 0; k < 9; k++) {                          // fish in the shallows, seen through the water
+      for (k = 0; k < Math.min(Math.round(9 * area), 40); k++) {   // fish in the shallows, seen through the water
         var fx2 = 0, fy2 = 0, t2 = 0;
-        do { fx2 = 8 + R() * 144; fy2 = 8 + R() * 74; t2++; } while ((this._depthAt(fx2, fy2) < 1.2 || this._depthAt(fx2, fy2) > 6) && t2 < 80);
+        do { fx2 = 8 + R() * (mw - 16); fy2 = 8 + R() * (mh - 16); t2++; } while ((this._depthAt(fx2, fy2) < 1.2 || this._depthAt(fx2, fy2) > 6) && t2 < 80);
         this.fish.push({ x: fx2, y: fy2, dir: R() * 6.28, speed: 2 + R() * 3, turn: 0, size: 1.4 + R() * 1.1, flee: 0, ph: R() * 6.28 });
       }
     }
+  };
+  WaterLite.prototype._uploadTopMap = function () {
+    var gl = this.gl, T = this.top;
+    if (this.tex.map) { gl.deleteTexture(this.tex.map); gl.deleteTexture(this.tex.sim); }
+    this.tex.map = this._dataTex(T.W, T.H, gl.LINEAR);
+    gl.bindTexture(gl.TEXTURE_2D, this.tex.map); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, T.W, T.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, T.mapBytes);
+    this.tex.sim = this._dataTex(T.W, T.H, gl.LINEAR, gl.LUMINANCE);
   };
   WaterLite.prototype._topIndex = function (x, y) { var T = this.top; return clamp(Math.floor(y * T.cell), 0, T.H - 1) * T.W + clamp(Math.floor(x * T.cell), 0, T.W - 1); };
   WaterLite.prototype._topHeight = function (x, y) { return this.top.cur[this._topIndex(x, y)]; };
   WaterLite.prototype._isLand = function (x, y) { return this.top.mask[this._topIndex(x, y)] === 1; };
   WaterLite.prototype._shoreDist = function (x, y) { return this.top.shore[this._topIndex(x, y)] / this.top.cell; };
   WaterLite.prototype._depthAt = function (x, y) { return -this.top.E[this._topIndex(x, y)]; };
+  // the visible part of the map: covers the canvas at zoom 1, centred on camera2d and kept inside the map
   WaterLite.prototype._topRect = function () {
-    var T = this.top, c = this.canvas, a = (c.clientHeight || c.height) / (c.clientWidth || c.width);
-    if (a < T.worldH / T.worldW) { var vh = T.worldW * a; return [0, (T.worldH - vh) / 2, T.worldW, vh]; }
-    var vw = T.worldH / a; return [(T.worldW - vw) / 2, 0, vw, T.worldH];
+    var T = this.top, c = this.canvas, a = (c.clientHeight || c.height) / (c.clientWidth || c.width), z = Math.max(+this.opts.zoom || 1, 1), vw, vh;
+    if (a < T.worldH / T.worldW) { vw = T.worldW; vh = vw * a; } else { vh = T.worldH; vw = vh / a; }
+    vw /= z; vh /= z;
+    var cam = this.camera2d, cx = clamp(cam.x, vw / 2, T.worldW - vw / 2), cy = clamp(cam.y, vh / 2, T.worldH - vh / 2);
+    return [cx - vw / 2, cy - vh / 2, vw, vh];
   };
   WaterLite.prototype._updateTop = function (dt) {
     var T = this.top, W = T.W, H = T.H, x, y, i, self = this;
@@ -1716,7 +1964,7 @@
         var best = 0, bestD = -1;
         for (var k = -2; k <= 2; k++) {
           var ang = b.heading + k * 0.45, ax = b.x + Math.cos(ang) * 12, ay = b.y + Math.sin(ang) * 12;
-          var dd = (ax < 4 || ay < 4 || ax > 156 || ay > 86) ? 0 : Math.min(this._shoreDist(ax, ay), this._shoreDist(b.x + Math.cos(ang) * 6, b.y + Math.sin(ang) * 6));
+          var dd = (ax < 4 || ay < 4 || ax > T.worldW - 4 || ay > T.worldH - 4) ? 0 : Math.min(this._shoreDist(ax, ay), this._shoreDist(b.x + Math.cos(ang) * 6, b.y + Math.sin(ang) * 6));
           if (dd > bestD + 0.3 || (k === 0 && dd >= bestD)) { bestD = dd; best = k; }
         }
         if (this._shoreDist(b.x + Math.cos(b.heading) * 10, b.y + Math.sin(b.heading) * 10) < 4) steer = best === 0 ? 1 : best / 2;
@@ -1724,22 +1972,22 @@
       b.speed += (thr * 16 - b.speed) * Math.min(dt * 1.4, 1);
       b.heading += clamp(steer, -1, 1) * dt * 1.7 * clamp(Math.abs(b.speed) / 6, 0.3, 1);
       var nx = b.x + Math.cos(b.heading) * b.speed * dt, ny = b.y + Math.sin(b.heading) * b.speed * dt;
-      if (!this._isLand(nx, ny) && nx > 2 && ny > 2 && nx < 158 && ny < 88) { b.x = nx; b.y = ny; } else b.speed *= -0.3;
+      if (!this._isLand(nx, ny) && nx > 2 && ny > 2 && nx < T.worldW - 2 && ny < T.worldH - 2) { b.x = nx; b.y = ny; } else b.speed *= -0.3;
       b.a = b.heading + Math.PI / 2;
       if (Math.abs(b.speed) > 1) {
         var sp = Math.abs(b.speed) / 16;
-        this.splash(b.x - Math.cos(b.heading) * 3.6, b.y - Math.sin(b.heading) * 3.6, 0.55 * sp * dt * 60 * 0.12, 1.5);
-        this.splash(b.x + Math.cos(b.heading) * 4.2, b.y + Math.sin(b.heading) * 4.2, -0.25 * sp * dt * 60 * 0.12, 1.2);
+        this.splash(b.x - Math.cos(b.heading) * 3.6, b.y - Math.sin(b.heading) * 3.6, 0.55 * sp * dt * 60 * 0.12, 1.5, true);
+        this.splash(b.x + Math.cos(b.heading) * 4.2, b.y + Math.sin(b.heading) * 4.2, -0.25 * sp * dt * 60 * 0.12, 1.2, true);
       }
     }
     this.floaters.forEach(function (f) {
       if (f === b) return;
       var gx = self._topHeight(f.x + 1, f.y) - self._topHeight(f.x - 1, f.y), gy = self._topHeight(f.x, f.y + 1) - self._topHeight(f.x, f.y - 1);
-      var wd = self.opts.windDir * Math.PI / 180, wind = self.opts.wind * 0.004;
+      var wd = self.opts.windDir * Math.PI / 180, wind = self._windSpeed() * 0.004;
       f.vx = (f.vx - gx * 30 * dt + Math.cos(wd) * wind * dt) * Math.exp(-dt * 0.8);
       f.vy = (f.vy - gy * 30 * dt + Math.sin(wd) * wind * dt) * Math.exp(-dt * 0.8);
       var nx2 = f.x + f.vx * dt, ny2 = f.y + f.vy * dt;
-      if (!self._isLand(nx2, ny2) && nx2 > 1 && ny2 > 1 && nx2 < 159 && ny2 < 89) { f.x = nx2; f.y = ny2; } else { f.vx *= -0.5; f.vy *= -0.5; }
+      if (!self._isLand(nx2, ny2) && nx2 > 1 && ny2 > 1 && nx2 < T.worldW - 1 && ny2 < T.worldH - 1) { f.x = nx2; f.y = ny2; } else { f.vx *= -0.5; f.vy *= -0.5; }
       f.a += (f.vx - f.vy) * dt * 0.3;
       f.bob = self._topHeight(f.x, f.y);
     });
@@ -1749,7 +1997,7 @@
       f.turn += (Math.sin(self.time * 0.9 + f.ph) * 0.8 - f.turn) * dt;
       f.dir += f.turn * dt;
       var spd = f.speed * (1 + f.flee * 2.5), ax = f.x + Math.cos(f.dir) * 3, ay = f.y + Math.sin(f.dir) * 3, d2 = self._depthAt(ax, ay);
-      if (d2 < 0.9 || d2 > 7 || ax < 3 || ay < 3 || ax > 157 || ay > 87) f.dir += dt * 3.2;
+      if (d2 < 0.9 || d2 > 7 || ax < 3 || ay < 3 || ax > T.worldW - 3 || ay > T.worldH - 3) f.dir += dt * 3.2;
       else { f.x += Math.cos(f.dir) * spd * dt; f.y += Math.sin(f.dir) * spd * dt; }
     });
     var B = T.bytes, c2 = T.cur;
@@ -1764,6 +2012,8 @@
   };
   WaterLite.prototype._renderTop = function (w, h, A) {
     var gl = this.gl, T = this.top, C = this.colors, rect = this._topRect(), b = this.topBoat, self = this;
+    if (this.stats.px > 1) { var ux = rect[2] / w, uy = rect[3] / h; rect[0] = Math.round(rect[0] / ux) * ux; rect[1] = Math.round(rect[1] / uy) * uy; }
+    this._rect = rect;
     var sh = new Float32Array(48), n = 0;
     this.floaters.forEach(function (f) {
       if (n >= 12) return;
@@ -1792,7 +2042,8 @@
     gl.useProgram(p.p); this._quadAttrib(); this._common(p); this._topUniforms(p, rect);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, Lr.t); gl.uniform1i(p.loc('uBed'), 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.tex.sim); gl.uniform1i(p.loc('uSim'), 1);
-    gl.uniform2f(p.loc('uSimSize'), T.W, T.H); gl.uniform1f(p.loc('uFoam'), this.opts.foam); gl.uniform1f(p.loc('uWindAmt'), clamp(this.opts.wind / 10, 0.2, 1.5));
+    gl.uniform2f(p.loc('uSimSize'), T.W, T.H); gl.uniform1f(p.loc('uFoam'), this.opts.foam); gl.uniform1f(p.loc('uWindAmt'), clamp(this._windSpeed() / 10, 0.2, 1.5));
+    gl.uniform1f(p.loc('uStarCell'), 7 * rect[2] / w);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     this._sprites(rect, w, this.floaters.map(function (f) {
       if (f === b) return { x: f.x, y: f.y, w: f.size * 0.5, h: f.size, a: f.a, kind: 4, color: [0.93, 0.93, 0.91], color2: C.wood };
@@ -1803,8 +2054,9 @@
 
   // ---- shared ----------------------------------------------------------------------------
   // Side: x, y in view units. Top: world units. 3D: world x, z (leaves foam).
-  WaterLite.prototype.splash = function (x, y, power, radius) {
+  WaterLite.prototype.splash = function (x, y, power, radius, silent) {
     var m = this.opts.mode;
+    if (!silent) this._emit('splash', m === '3d' ? { mode: m, x: x, z: y, power: power || 1, radius: radius || 1 } : { mode: m, x: x, y: y, power: power, radius: radius || (m === 'side' ? 20 : 2) });
     if (m === 'side') {
       this._push(x, -Math.abs(power) * 0.25, radius || 20);
       var n = Math.min(26, Math.round(4 + power * 1.2)), ys = this.side.level - this._sideHeight(x);
@@ -1833,7 +2085,10 @@
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, null);
   };
   WaterLite.prototype._common = function (p) {
-    var gl = this.gl, C = this.colors, st = this.style, wd = this.opts.windDir * Math.PI / 180, t = this.time;
+    var gl = this.gl, C = this._fc || this.colors, E = this.env, st = this.style, wd = this.opts.windDir * Math.PI / 180, t = this.time;
+    gl.uniform3fv(p.loc('uLight'), C.light || [1, 1, 1]); gl.uniform3fv(p.loc('uGlowCol'), C.glow); gl.uniform1f(p.loc('uGlow'), E.glow);
+    gl.uniform1f(p.loc('uStars'), E.stars); gl.uniform1f(p.loc('uRain'), this.rainAmt); gl.uniform1f(p.loc('uOvercast'), E.overcast);
+    gl.uniform3fv(p.loc('uSkyMid'), C.skyMid); gl.uniform1f(p.loc('uDesat'), E.desat);
     gl.uniform1f(p.loc('uStyle'), st.id); gl.uniform1f(p.loc('uTime'), t % 1800);
     gl.uniform1f(p.loc('uBands'), st.bands); gl.uniform1f(p.loc('uCrisp'), st.crisp); gl.uniform1f(p.loc('uScenery'), this.opts.scenery ? 1 : 0);
     gl.uniform3fv(p.loc('uPaper'), C.paper); gl.uniform3fv(p.loc('uInk'), C.ink); gl.uniform3fv(p.loc('uDeep'), C.deep); gl.uniform3fv(p.loc('uShallow'), C.shallow);
@@ -1875,23 +2130,149 @@
     if (this.opts.mode === 'side') this._updateSide(dt);
     else if (this.opts.mode === 'top') this._updateTop(dt);
     else this._update3d(dt);
+    this._updateWeather(dt);
+    this._updateCamera2d(dt);
+  };
+  WaterLite.prototype._windSpeed = function () { return this.opts.wind * (this.env ? this.env.wind : 1); };
+  WaterLite.prototype._updateWeather = function (dt) {
+    var E = this.env, L = this._storm, m = this.opts.mode, i;
+    this._flash = 0; this._bolt = null;
+    if (E.lightning || (L && L.t >= 0)) {
+      if (!L) L = this._storm = { next: this.time + 1.5 + Math.random() * 3, t: -1 };
+      if (L.t < 0 && this.time >= L.next) {
+        L.t = 0; L.seed = Math.random() * 97; L.pos = Math.random(); L.strength = 0.65 + Math.random() * 0.35;
+        this._emit('lightning', { strength: L.strength, x: L.pos });   // x: where across the view, for panning thunder
+      }
+      if (L.t >= 0) {
+        var seq = [1, 0.3, 0.85, 0.15, 0.55, 0.22, 0.07], k = Math.floor(L.t / 0.075);
+        L.t += dt;
+        if (k >= seq.length) { L.t = -1; L.next = this.time + 3 + Math.random() * 8; if (!E.lightning) this._storm = null; }
+        else { this._flash = seq[k] * L.strength; if (k < 4 && this.opts.scenery) this._bolt = L; }
+      }
+    } else this._storm = null;
+    var r = this.rainAmt;
+    if (r <= 0.001) return;
+    if (m === 'top') {                                     // drops land in the ripple simulation, in and near the view
+      var R = this._rect || this._topRect(), n = r * 170 * dt * (R[2] * R[3] / 14400);
+      for (i = 0; i < n || (i === 0 && Math.random() < n); i++) this.splash(R[0] + Math.random() * R[2], R[1] + Math.random() * R[3], 0.07 + Math.random() * 0.09, 0.7, true);
+    } else if (m === 'side') {                             // little kicks to the surface, and spray
+      var S = this.side, hits = r * 70 * dt;
+      for (i = 0; i < hits || (i === 0 && Math.random() < hits); i++) {
+        var x = S.camX + Math.random() * S.viewW;
+        this._push(x, -(0.2 + Math.random() * 0.25), 3);
+        if (Math.random() < 0.6) this.drops.push({ x: x, y: S.level - this._sideHeight(x) - 1, vx: (Math.random() - 0.5) * 40, vy: -35 - Math.random() * 45, r: 0.9 + Math.random() * 0.8, life: 0.4 });
+      }
+      if (this.drops.length > 160) this.drops.splice(0, this.drops.length - 160);
+    }
+  };
+  // a lightning strike now, in any mood (storms also strike on their own); x: where across the view, 0 .. 1
+  WaterLite.prototype.lightning = function (strength, x) {
+    var L = this._storm || (this._storm = { next: Infinity, t: -1 });
+    L.t = 0; L.seed = Math.random() * 97; L.pos = x === undefined ? Math.random() : clamp(x, 0, 1); L.strength = clamp(strength || 1, 0.1, 1.5);
+    this._emit('lightning', { strength: L.strength, x: L.pos });
+    return this;
+  };
+  WaterLite.prototype._updateCamera2d = function (dt) {
+    var cam = this.camera2d, f = cam.follow, m = this.opts.mode;
+    if (m === '3d') return;
+    if (f && typeof f.x === 'number') {
+      var k = Math.min(dt * 3.5, 1);
+      cam.x += (f.x - cam.x) * k;
+      if (m === 'top' && typeof f.y === 'number') cam.y += (f.y - cam.y) * k;
+    }
+    if (m === 'side') { var S = this.side; cam.x = clamp(cam.x, S.viewW / 2, S.worldW - S.viewW / 2); }
+    else { var r = this._topRect(); cam.x = r[0] + r[2] / 2; cam.y = r[1] + r[3] / 2; }   // stay where the view really is
+  };
+  WaterLite.prototype._frameColors = function () {
+    var C = this.colors, F = {}, f = this.style.id === 5 ? 0 : (this._flash || 0), L = this.env.light, k;
+    for (k in C) F[k] = C[k];
+    function add(a, v) { return [a[0] + v[0] * f, a[1] + v[1] * f, a[2] + v[2] * f]; }
+    F.light = add(L, [0.85, 0.88, 1.0]);
+    if (f > 0) { F.skyTop = add(C.skyTop, [0.45, 0.48, 0.58]); F.skyHorizon = add(C.skyHorizon, [0.55, 0.58, 0.68]); F.skyMid = add(C.skyMid, [0.5, 0.53, 0.63]); F.sun = add(C.sun, [0.5, 0.52, 0.62]); }
+    this._fc = F;
+  };
+  WaterLite.prototype._drawRain = function (A, w, h) {
+    var gl = this.gl, p = this.prog.rain, m = this.opts.mode, wd = this.opts.windDir * Math.PI / 180, F = this._fc, dir, len;
+    if (m === 'top') { dir = [Math.cos(wd), Math.sin(wd)]; len = Math.max(2, h * 0.012); }   // seen from above: short dashes
+    else {
+      var r = this._camRight || [1, 0, 0], slant = m === 'side' ? Math.cos(wd) * 0.35 : (Math.cos(wd) * r[0] + Math.sin(wd) * r[2]) * 0.4 + 0.06, l = Math.sqrt(1 + slant * slant);
+      dir = [slant / l, 1 / l]; len = Math.max(3, h * 0.036);
+    }
+    var col = this.style.id === 5 ? this.colors.ink : [0, 1, 2].map(function (i) { return (F.skyHorizon[i] * 0.5 + 0.5) * Math.min(F.light[i] * 1.2, 1); });
+    gl.bindFramebuffer(gl.FRAMEBUFFER, A.f); gl.viewport(0, 0, w, h);
+    gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(p.p); this._quadAttrib();
+    gl.uniform2f(p.loc('uRes'), w, h); gl.uniform2f(p.loc('uRainDir'), dir[0], dir[1]); gl.uniform1f(p.loc('uRainLen'), len);
+    gl.uniform1f(p.loc('uRainAmt'), this.rainAmt); gl.uniform4f(p.loc('uRainCol'), col[0], col[1], col[2], this.style.id === 5 ? 0.6 : 0.42);
+    gl.uniform1f(p.loc('uT'), this.time % 600);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.disable(gl.BLEND);
+  };
+  // frame times: stats.fps, and for quality 'auto' the drawing resolution follows the GPU's load
+  WaterLite.prototype._timeFrame = function () {
+    var now = root.performance && root.performance.now ? root.performance.now() : Date.now(), ms = now - (this._lastT || 0), A;
+    this._lastT = now;
+    if (!this._auto) this._auto = { scale: 0.75, t: 0, fast: 0, drops: 0, ref: 0, budget: 1000 / 60 };
+    A = this._auto;
+    if (!(ms > 0 && ms < 250)) return;                     // first frame, or back from a hidden tab
+    this._avgMs = this._avgMs ? this._avgMs * 0.9 + ms * 0.1 : ms;
+    this.stats.fps = Math.round(1000 / this._avgMs);
+    if (!this.q.auto || this.pixelSize > 1) return;
+    A.t += ms;
+    if (A.t < 500) return;                                 // decide twice a second
+    A.t = 0;
+    var avg = this._avgMs;
+    if (avg > A.budget * 1.25 && A.scale > 0.4) {
+      if (A.drops >= 2 && avg > A.ref * 0.93) {           // drawing less did not help: the game is CPU-bound or capped,
+        A.budget = Math.max(A.budget, avg * 0.97);         // so aim for the frame rate it actually runs at
+        A.scale = Math.min(1, A.scale / 0.72); A.drops = 0;
+        return;
+      }
+      if (!A.drops) A.ref = avg;
+      A.scale = Math.max(0.4, A.scale * 0.85); A.drops++; A.fast = 0;
+    } else if (avg < A.budget * 1.08) {
+      A.drops = 0;
+      if (++A.fast >= 4 && A.scale < 1) { A.scale = Math.min(1, A.scale * 1.08); A.fast = 0; }
+    } else A.fast = 0;
+  };
+  // Times each quality on this device (blocks for a moment; it resets the scene, so run it before play).
+  // Returns { ms: { potato, low, medium, high }, recommended } where recommended leaves headroom for your game.
+  WaterLite.prototype.benchmark = function (frames) {
+    var gl = this.gl, saved = this.opts.quality, out = {}, px = new Uint8Array(4), self = this, best = 'potato';
+    var now = function () { return root.performance && root.performance.now ? root.performance.now() : Date.now(); };
+    frames = frames || 10;
+    ['potato', 'low', 'medium', 'high'].forEach(function (q) {
+      self.setOptions({ quality: q });
+      self.update(1 / 60); self.render(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // compile and allocate first
+      var t0 = now();
+      for (var i = 0; i < frames; i++) { self.update(1 / 60); self.render(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+      var ms = (now() - t0) / frames;
+      out[q] = +ms.toFixed(2);
+      if (ms < 1000 / 60 * 0.6) best = q;
+    });
+    this.setOptions({ quality: saved });
+    this._lastT = 0;
+    return { ms: out, recommended: best };
   };
   WaterLite.prototype.render = function () {
     var gl = this.gl;
     if (gl.isContextLost()) return;
     this.resize();
-    var cw = this.canvas.width, ch = this.canvas.height, px = 1, lw, lh;
+    this._frameColors();
+    this._timeFrame();
+    var cw = this.canvas.width, ch = this.canvas.height, px = 1, lw, lh, sc = this.q.scale * (this.q.auto ? this._auto.scale : 1);
     if (this.pixelSize > 1) {
       px = Math.max(2, Math.round(this.pixelSize * (this._dpr || 1)));
-      lw = Math.ceil(cw / px); lh = Math.ceil(ch / px);
-    } else { lw = Math.max(16, Math.round(cw * this.q.scale)); lh = Math.max(16, Math.round(ch * this.q.scale)); }
-    this.stats.lowW = lw; this.stats.lowH = lh; this.stats.px = px;
+      lw = Math.ceil(cw / px); lh = Math.ceil(ch / px); sc = 1;
+    } else { lw = Math.max(16, Math.round(cw * sc)); lh = Math.max(16, Math.round(ch * sc)); }
+    this.stats.lowW = lw; this.stats.lowH = lh; this.stats.px = px; this.stats.scale = +sc.toFixed(2);
     var pal = PALETTES[this.palName] || null, quant = !!pal || this.style.bits > 0;
     var A = this._target('scene', lw, lh, quant || px > 1 ? gl.NEAREST : gl.LINEAR);
     if (this.opts.mode === 'side') this._renderSide(lw, lh, A);
     else if (this.opts.mode === 'top') this._renderTop(lw, lh, A);
     else this._render3d(lw, lh, A);
     gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+    if (this.rainAmt > 0.001) this._drawRain(A, lw, lh);
     var src = A, p;
     if (quant) {
       var B = this._target('quant', lw, lh, gl.NEAREST);
@@ -1916,8 +2297,8 @@
   // screen (CSS pixels from the canvas's top left) to the mode's world
   WaterLite.prototype.screenToWorld = function (sx, sy) {
     var c = this.canvas, u = sx / c.clientWidth, v = sy / c.clientHeight, m = this.opts.mode;
-    if (m === 'side') return { x: u * this.side.viewW, y: v * this.side.viewH };
-    if (m === 'top') { var r = this._topRect(); return { x: r[0] + u * r[2], y: r[1] + v * r[3] }; }
+    if (m === 'side') return { x: this.side.camX + u * this.side.viewW, y: v * this.side.viewH };
+    if (m === 'top') { var r = this._rect || this._topRect(); return { x: r[0] + u * r[2], y: r[1] + v * r[3] }; }
     var cam = this.cam, eye = this._eye(), L = lookAt(eye, cam.target), ty = Math.tan(cam.fov / 2), asp = c.clientWidth / c.clientHeight;
     var nx = u * 2 - 1, ny = 1 - v * 2;
     var d = [0, 1, 2].map(function (k) { return L.f[k] + L.r[k] * nx * ty * asp + L.u[k] * ny * ty; });
@@ -1938,21 +2319,50 @@
       this.splash(w.x, w.z, 1);
     }
   };
+  Object.defineProperty(WaterLite.prototype, 'boat', { get: function () {
+    var m = this.opts.mode; return m === 'top' ? this.topBoat : m === '3d' ? this.boat3d : null;
+  } });
   WaterLite.prototype.config = function () {
     var o = {}; for (var k in DEFAULTS) o[k] = this.opts[k];
     if (typeof o.land === 'function') o.land = 'custom';
     return o;
   };
+  // events: 'splash' { mode, x, y (z in 3D), power, radius }, 'lightning' { strength }, 'contextlost', 'contextrestored'
+  WaterLite.prototype.on = function (type, fn) { (this._ev[type] = this._ev[type] || []).push(fn); return this; };
+  WaterLite.prototype.off = function (type, fn) {
+    var L = this._ev[type];
+    if (L) this._ev[type] = fn ? L.filter(function (f) { return f !== fn; }) : [];
+    return this;
+  };
+  WaterLite.prototype._emit = function (type, e) {
+    var L = this._ev[type];
+    if (!L || !L.length) return;
+    e.type = type; e.target = this;
+    L.slice().forEach(function (fn) { fn(e); });
+  };
+  WaterLite.prototype._restore = function () {
+    var gl = this.gl, n = this.grid ? this.grid.n : 96;
+    this.grid = null; this.terrain = null; this.props = null;
+    this._initGL();
+    this._buildGrid(n);
+    if (this.terrainData) this._uploadTerrain();
+    if (this.side) this.tex.heights = this._dataTex(this.side.cols, 1, gl.NEAREST, gl.LUMINANCE_ALPHA);
+    if (this.top) this._uploadTopMap();
+  };
   WaterLite.prototype.dispose = function () {
     var gl = this.gl, k;
-    for (k in this.prog) gl.deleteProgram(this.prog[k].p);
+    this.canvas.removeEventListener('webglcontextlost', this._onLost, false);
+    this.canvas.removeEventListener('webglcontextrestored', this._onRestored, false);
+    this._ev = {};
+    for (k in this._progs) gl.deleteProgram(this._progs[k].p);
     for (k in this.tex) if (this.tex[k]) gl.deleteTexture(this.tex[k]);
     for (k in this.fbos) { gl.deleteFramebuffer(this.fbos[k].f); gl.deleteTexture(this.fbos[k].t); gl.deleteRenderbuffer(this.fbos[k].d); }
     for (k in this.meshes) gl.deleteBuffer(this.meshes[k].buf);
     if (this.grid) { gl.deleteBuffer(this.grid.vb); gl.deleteBuffer(this.grid.ib); }
-    if (this.terrain) { gl.deleteBuffer(this.terrain.vb); gl.deleteBuffer(this.terrain.ib); gl.deleteBuffer(this.props.buf); }
+    if (this.terrain) { gl.deleteBuffer(this.terrain.vb); gl.deleteBuffer(this.terrain.ib); }
+    if (this.props) gl.deleteBuffer(this.props.buf);
     gl.deleteBuffer(this.quad);
-    this.prog = {}; this.tex = {}; this.fbos = {};
+    this._progs = {}; this.tex = {}; this.fbos = {};
   };
 
   root.WaterLite = WaterLite;

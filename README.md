@@ -71,8 +71,12 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - **Six art styles:** realistic, toon, pixel art, low poly, retro and ink.
 - **Pixel art in whole pixels,** with retro palettes and clean ordered dithering.
 - **The same physics in every style:** things float, boats leave wakes, ripples bounce off coasts, and waves wash up beaches.
+- **Day, sunset, night and storm,** with rain, lightning, stars and glowing foam at night, in every view and style.
+- **Ready for real games:** scrolling 2D cameras and bigger maps, splash and lightning events for sound, an `auto` quality that follows the device, a one-call device benchmark, and recovery from a lost GPU context.
 
 ![Water Lite in three views and six art styles](media/lite-grid.jpg)
+
+![Water Lite at day, sunset, night and in a storm](media/lite-moods.jpg)
 
 See [lite/README.md](lite/README.md) for the API and options.
 

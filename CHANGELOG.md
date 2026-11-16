@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0
+
+- **Water Lite 2.1:** the gaps a real game hits.
+  - **Moods:** `mood: 'day' | 'sunset' | 'night' | 'storm'`.
+    - Sunset: a low sun, a glitter path, and a sky from indigo through rose to orange.
+    - Night: moon, stars (also in the water), moonlight that drains colour, and foam, wakes and splashes that glow.
+    - Storm: overcast, more wind, murkier water, rain and lightning with bolts.
+    - Palette styles get gentler moods that land on palette colours; ink turns to chalk at night.
+  - **Rain** (`rain`, 0 to 1): streaks at game resolution, rings on the 3D and top-down water, drops in the ripple simulation, spray in the side view.
+  - **2D cameras:** a side world wider than the screen (`worldWidth`, `camera2d.x`) with parallax; bigger top-down maps (`mapSize`) with `zoom` and a camera that can follow the boat or your player. Pixel styles scroll in whole pixels.
+  - **Events:** `on('splash')` and `on('lightning')` for sound; `lightning()` strikes on demand.
+  - **Performance tools:** `quality: 'auto'` adjusts the drawing resolution from frame times (and notices when the game is CPU-bound or capped); `benchmark()` times each preset and recommends one; `stats.fps` and `stats.scale`.
+  - **Robustness:** a lost WebGL context is rebuilt from CPU copies; shaders compile only for the view in use; the start-up textures are about 30 % faster to make (byte-identical) and shared between engines.
+  - **Polish:** the 3D waterline runs up and down the beach; terrain gets ambient occlusion; top-down coastlines stay organic when zoomed in.
+  - The demo gains time and weather, Auto quality, Test this device, camera controls and procedural sound.
+
 ## 1.2.0
 
 - **Water Lite 2:** rebuilt around clear, see-through water.
