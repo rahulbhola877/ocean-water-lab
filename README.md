@@ -13,7 +13,7 @@
 
 ## Try it
 
-Open `demo/dist/index.html` in Chrome, Edge, Firefox or Safari. It is one self-contained file with no build step, no server and no install. It needs WebGL 2.
+Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, Firefox or Safari. It is one self-contained file with no build step, no server and no install. It needs WebGL 2.
 
 - **Game looks:** one click for Tropical Bay, Golden Coast, Pirate Seas, Big Surf, Hurricane, Pirate Storm, Deep Ocean, Moonlit or Glass Calm.
 - **Take the helm:** pick Speedboat or Pirate ship, then press *Take the helm*.
@@ -78,6 +78,8 @@ The engine-facing code is in [`kit/`](kit/README.md):
 ## Building from source
 
 ```
+git clone https://github.com/rahulbhola877/ocean-water-lab
+cd ocean-water-lab
 npm install          # only needed for the test scripts (Playwright)
 npm run build        # demo/src + demo/shaders + kit -> demo/dist/index.html
 npm run hlsl         # regenerate kit/hlsl from kit/glsl (Python 3)
