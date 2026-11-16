@@ -206,6 +206,75 @@ const results = await page.evaluate(async () => {
   ok('auto quality lowers resolution under load and raises it with headroom', settled < 0.75 && settled >= 0.4 && A2._auto.scale > settled, 'scale under load ' + settled.toFixed(2) + ', then ' + A2._auto.scale.toFixed(2) + ' (stats.scale ' + A2.stats.scale + ', fps ' + A2.stats.fps + ')');
   A2.dispose();
 
+  // ---- 2.2: the weak spots ------------------------------------------------------------------
+  // a low sun keeps a top-down map readable (pixel art at sunset used to leave island centres black)
+  const darkShare = (E) => {
+    const g2 = E.gl, w = g2.drawingBufferWidth, h = g2.drawingBufferHeight, px2 = new Uint8Array(w * h * 4);
+    g2.readPixels(0, 0, w, h, g2.RGBA, g2.UNSIGNED_BYTE, px2);
+    let dark = 0; for (let i = 0; i < px2.length; i += 4) if (px2[i] * 0.3 + px2[i + 1] * 0.59 + px2[i + 2] * 0.11 < 40) dark++;
+    return dark / (w * h);
+  };
+  const P2 = mk({ mode: 'top', style: 'pixel' });
+  P2.update(1 / 60); P2.render(); const dDay = darkShare(P2);
+  P2.setOptions({ mood: 'sunset' }); P2.update(1 / 60); P2.render(); const dSun = darkShare(P2);
+  ok('top-down pixel sunset keeps its islands readable', dSun < dDay + 0.06, 'near-black pixels: day ' + (dDay * 100).toFixed(1) + ' %, sunset ' + (dSun * 100).toFixed(1) + ' %');
+  P2.dispose();
+
+  // big maps: full-density grid, ripples simulated only around the view
+  const G2 = mk({ mode: 'top', mapSize: [480, 270], zoom: 3 });
+  G2.camera2d.follow = G2.boat;
+  for (let i = 0; i < 120; i++) G2.update(1 / 60);
+  const win = G2.top.win, winCells = (win[2] - win[0] + 1) * (win[3] - win[1] + 1), allCells = G2.top.W * G2.top.H;
+  G2.splash(G2.boat.x + 6, G2.boat.y, 1.5, 2.5);
+  for (let i = 0; i < 20; i++) G2.update(1 / 60);
+  const rip2 = Math.abs(G2.sample(G2.boat.x + 9, G2.boat.y).height) + Math.abs(G2.sample(G2.boat.x + 6, G2.boat.y + 3).height);
+  G2.render();
+  ok('big maps keep full detail and simulate ripples only near the view', Math.abs(G2.top.cell - 1) < 0.01 && winCells < allCells * 0.4 && rip2 > 0.01 && G2.gl.getError() === 0,
+    'grid ' + G2.top.W + 'x' + G2.top.H + ', simulating ' + winCells + ' of ' + allCells + ' cells, ripple ' + rip2.toFixed(3));
+  G2.dispose();
+
+  // lightning on your terms
+  const L2 = mk({ mode: 'side', mood: 'storm', lightning: 0 });
+  let n0 = 0; L2.on('lightning', () => n0++);
+  for (let i = 0; i < 60 * 20; i++) L2.update(1 / 60);
+  L2.setOptions({ mood: 'sunset', lightning: 30 }); let n1 = 0; L2.off('lightning'); L2.on('lightning', () => n1++);
+  for (let i = 0; i < 60 * 20; i++) L2.update(1 / 60);
+  ok('lightning: off in a storm, or any rate in any mood', n0 === 0 && n1 >= 4, 'storm with lightning 0: ' + n0 + ' strikes in 20 s; sunset at 30 a minute: ' + n1);
+
+  // medium-precision GPUs: every animation phase handed to the shaders stays small, even after a day
+  L2.setOptions({ mode: 'top', mood: 'night', rain: 0.5, lightning: -1 });
+  L2.time = 86400 * 1.37; L2.update(1 / 60); L2.render();
+  const g3 = L2.gl, read = (pr, n) => { const l = pr.loc(n); return l ? Array.from(g3.getUniform(pr.p, l)) : [NaN]; };
+  const topP = L2._progs.topWater, ph = { rip: read(topP, 'uRipOff'), fr: read(topP, 'uFr'), ang: read(topP, 'uAng') };
+  L2.setOptions({ mode: 'side' }); L2.time = 86400 * 1.37; L2.update(1 / 60); L2.render();
+  ph.cells = read(L2._progs.sideWater, 'uCells').slice(0, 2);
+  const small = ph.rip.every((v) => v >= 0 && v < 1) && ph.fr.every((v) => v >= 0 && v < 1) && ph.ang.every((v) => v >= 0 && v < 6.3) && ph.cells.every((v) => v >= 0 && v < 256);
+  ok('animation phases stay small after a day of running', small && g3.getError() === 0 && typeof L2.stats.highp === 'boolean' && L2.stats.gpu.length > 0, 'uAng ' + ph.ang.map((v) => v.toFixed(2)).join(',') + ' · GPU ' + L2.stats.gpu.slice(0, 40) + '… · highp ' + L2.stats.highp);
+  L2.dispose();
+
+  // floating things bump into each other
+  const K2 = mk({ mode: 'side', floaters: false, scenery: false });
+  const c1 = K2.addFloater(200, 60, { kind: 'crate', size: 22 }), c2 = K2.addFloater(200, 20, { kind: 'crate', size: 22 }), c3 = K2.addFloater(230, 40, { kind: 'barrel', size: 18 });
+  for (let i = 0; i < 900; i++) K2.update(1 / 60);
+  let worstOv = 0;
+  for (const [p, q] of [[c1, c2], [c1, c3], [c2, c3]]) { const ox = (p.w + q.w) * 0.45 - Math.abs(p.x - q.x); if (ox > 0 && Math.abs(p.y - q.y) < (p.h + q.h) * 0.3) worstOv = Math.max(worstOv, ox); }
+  ok('floating things push each other apart instead of overlapping', worstOv < 2 && [c1, c2, c3].every((f) => f.sub > 0.3), 'worst side-by-side overlap ' + worstOv.toFixed(1) + ', all floating');
+  K2.dispose();
+  const Q2 = mk({ mode: 'top', floaters: false, land: 'none' });
+  const bq = Q2.boat; bq.auto = false; bq.x = 60; bq.y = 45; bq.heading = 0;
+  const cq = Q2.addFloater(72, 45, { kind: 'crate', size: 3 });
+  Q2.input.up = true;
+  for (let i = 0; i < 90; i++) Q2.update(1 / 60);
+  ok('the top-view boat shoves crates out of its way', cq.x - bq.x > 4, 'crate ' + (cq.x - bq.x).toFixed(1) + ' ahead of the boat');
+  Q2.dispose();
+
+  // your own 3D islands
+  const I2 = mk({ mode: '3d', islands: [{ x: 0, z: -60, r: 30, hill: 12 }, { x: 120, z: -10, r: 15, hill: 4 }] });
+  I2.update(1 / 60); I2.render();
+  ok('3D islands can be laid out by hand', I2.islands.length === 2 && I2._terrainHeight(0, -60) > 8 && I2._terrainHeight(120, -10) > 2 && I2._terrainHeight(60, -35) < -3 && I2.gl.getError() === 0,
+    'peaks ' + I2._terrainHeight(0, -60).toFixed(1) + ' m and ' + I2._terrainHeight(120, -10).toFixed(1) + ' m, water between ' + I2._terrainHeight(60, -35).toFixed(1) + ' m');
+  I2.dispose();
+
   // benchmark
   const B2 = mk({ mode: 'top' }, 160, 90);
   const bm = B2.benchmark(2);

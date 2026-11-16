@@ -20,6 +20,8 @@ html, body { height: 100%; margin: 0; overflow: hidden; background: #2a3442 repe
   box-shadow: 0 8px 28px rgba(6, 16, 30, 0.25); display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin;
 }
 h1 { margin: 0; font-size: 17px; letter-spacing: 0.02em; }
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+#sheet { display: none; flex: none; }
 h1 span { color: var(--muted); font-weight: 500; font-size: 13px; display: block; margin-top: 2px; letter-spacing: 0; }
 h2 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
@@ -45,17 +47,25 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
 .note { font-size: 12px; color: var(--muted); line-height: 1.4; margin: 0; }
 .err { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; padding: 24px; text-align: center; }
 @media (max-width: 700px) {
-  .panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 48%; border-radius: 12px 12px 0 0; }
-  .hint { left: 12px; right: 12px; max-width: none; }
-  .hud { bottom: auto; top: 64px; }
+  /* a bottom sheet that starts folded, so the water stays in view; the hint and the frame counter share the top */
+  .panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 62%; border-radius: 12px 12px 0 0; padding-bottom: calc(12px + env(safe-area-inset-bottom)); transition: max-height 0.2s; }
+  .panel.folded { max-height: 58px; overflow: hidden; }
+  .panel.folded h1 span { display: none; }
+  #sheet { display: block; }
+  .hint { left: 12px; right: 12px; max-width: none; font-size: 12px; transition: opacity 0.4s; }
+  .hint.gone { opacity: 0; }
+  .hud { bottom: calc(70px + env(safe-area-inset-bottom)); right: 12px; font-size: 11px; }
 }
 </style>
 </head>
 <body>
 <canvas id="water" tabindex="0" aria-label="Water simulation. Click to splash or drop things."></canvas>
 
-<div class="panel" role="region" aria-label="Water Lite settings">
-  <h1>Water Lite <span>Clear, stylized water for low-end browser games</span></h1>
+<div class="panel" id="settings" role="region" aria-label="Water Lite settings">
+  <div class="head">
+    <h1>Water Lite <span>Clear, stylized water for low-end browser games</span></h1>
+    <button type="button" id="sheet" aria-expanded="false" aria-controls="settings">Settings</button>
+  </div>
   <div>
     <h2>View</h2>
     <div class="seg" id="modes">
@@ -173,8 +183,9 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
   var HINTS = {
     '3d': 'Drag to look around · scroll to zoom · click the water to drop a crate',
     side: 'Click to drop crates, barrels and ducks · drag across the water to make waves',
-    top: 'WASD or arrows to sail the boat · click to make ripples · fish scatter from the boat'
+    top: 'WASD or arrows, or press and hold, to sail the boat · click to make ripples · fish scatter from the boat'
   };
+  var TOUCH_HINTS = { top: 'Hold to steer the boat · tap to make ripples · fish scatter from the boat' };
   var CAM_NOTES = {
     side: 'Big world makes the side view 1440 wide; scroll with A and D or the arrow keys. Set water.camera2d.x in your game.',
     top: 'Zoom in and the camera follows the boat; Big world makes a 480 × 270 map. Set water.camera2d or its follow target in your game.'
@@ -202,7 +213,9 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     SLIDERS.forEach(function (k) { var el = $(k); if (document.activeElement !== el) el.value = o[k]; $('o-' + k).textContent = FMT[k](+o[k]); });
     var th = WaterLite.THEMES[o.style], cc = o.colors || {};
     document.querySelectorAll('[data-color]').forEach(function (inp) { inp.value = cc[inp.dataset.color] || th[inp.dataset.color]; });
-    $('hint').textContent = HINTS[o.mode];
+    var touch = window.matchMedia('(pointer: coarse)').matches;
+    var hintText = touch ? (TOUCH_HINTS[o.mode] || HINTS[o.mode].replace(/Click/g, 'Tap').replace(/click/g, 'tap')) : HINTS[o.mode];
+    if ($('hint').textContent !== hintText) { $('hint').textContent = hintText; showHint(); }
     var cfg = water.config(), D = WaterLite.DEFAULTS, out = { mode: cfg.mode, style: cfg.style };
     Object.keys(cfg).forEach(function (k) { if (JSON.stringify(cfg[k]) !== JSON.stringify(D[k])) out[k] = cfg[k]; });
     $('config').value = 'var water = new WaterLite(canvas, ' + JSON.stringify(out, null, 2) + ');\n\n' +
@@ -218,13 +231,23 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     else water.setOptions({ worldWidth: water.opts.worldWidth > 480 ? 480 : 1440 });
     sync();
   };
+  var panel = document.querySelector('.panel'), small = window.matchMedia('(max-width: 700px)');
+  function setFolded(f) { panel.classList.toggle('folded', f); $('sheet').setAttribute('aria-expanded', String(!f)); $('sheet').textContent = f ? 'Settings' : 'Done'; }
+  if (small.matches) setFolded(true);
+  $('sheet').onclick = function () { setFolded(!panel.classList.contains('folded')); };
+  var hintTimer = 0;
+  function showHint() {
+    var h = $('hint'); h.classList.remove('gone'); clearTimeout(hintTimer);
+    if (small.matches) hintTimer = setTimeout(function () { h.classList.add('gone'); }, 7000);
+  }
   $('bench').onclick = function () {
     $('bench-out').textContent = 'Testing…';
     setTimeout(function () {
       var r = water.benchmark(10), names = { potato: 'Potato', low: 'Low', medium: 'Medium', high: 'High' };
       water.setOptions({ quality: r.recommended }); sync();
       $('bench-out').textContent = Object.keys(r.ms).map(function (k) { return names[k] + ' ' + r.ms[k] + ' ms'; }).join(' · ') +
-        ' per frame. Using ' + names[r.recommended] + ', which leaves room for your game.';
+        ' per frame. Using ' + names[r.recommended] + ', which leaves room for your game. GPU: ' + water.stats.gpu +
+        (water.stats.highp ? '.' : ', medium precision only (fine texture detail may look blocky).');
     }, 30);
   };
   SLIDERS.forEach(function (k) { $(k).oninput = function () { var o = {}; o[k] = parseFloat($(k).value); water.setOptions(o); sync(); }; });
@@ -240,10 +263,15 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     $('copy').textContent = 'Copied'; setTimeout(function () { $('copy').textContent = 'Copy code'; }, 1200);
   };
 
-  // pointer: orbit / drop / stir
-  var down = null, moved = 0;
-  canvas.addEventListener('pointerdown', function (e) { canvas.setPointerCapture(e.pointerId); down = { x: e.clientX, y: e.clientY }; moved = 0; canvas.focus(); });
+  // pointer: orbit / drop / stir; in the top view, press and hold to steer the boat toward the pointer
+  var down = null, moved = 0, steer = null, holdTimer = 0;
+  canvas.addEventListener('pointerdown', function (e) {
+    canvas.setPointerCapture(e.pointerId); down = { x: e.clientX, y: e.clientY }; moved = 0; canvas.focus();
+    clearTimeout(holdTimer);
+    if (water.opts.mode === 'top' && water.boat) holdTimer = setTimeout(function () { if (down && moved < 10) steer = { x: down.x, y: down.y }; }, 280);
+  });
   canvas.addEventListener('pointermove', function (e) {
+    if (steer) { steer.x = e.clientX; steer.y = e.clientY; return; }
     if (!down) return;
     var dx = e.clientX - down.x, dy = e.clientY - down.y; moved += Math.abs(dx) + Math.abs(dy); down.x = e.clientX; down.y = e.clientY;
     var r = canvas.getBoundingClientRect(), m = water.opts.mode;
@@ -251,11 +279,15 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     else if (m === 'side') { var w = water.screenToWorld(e.clientX - r.left, e.clientY - r.top); water.splash(w.x, w.y, Math.min(Math.abs(dy) * 0.6 + 2, 14), 18); }
     else { var t = water.screenToWorld(e.clientX - r.left, e.clientY - r.top); water.splash(t.x, t.y, 0.5, 2); }
   });
+  function endSteer() { steer = null; water.input.up = water.input.left = water.input.right = false; }
   canvas.addEventListener('pointerup', function (e) {
     var r = canvas.getBoundingClientRect();
-    if (down && moved < 6) water.drop(e.clientX - r.left, e.clientY - r.top);
+    clearTimeout(holdTimer);
+    if (steer) endSteer();
+    else if (down && moved < 6) water.drop(e.clientX - r.left, e.clientY - r.top);
     down = null;
   });
+  canvas.addEventListener('pointercancel', function () { clearTimeout(holdTimer); if (steer) endSteer(); down = null; });
   canvas.addEventListener('wheel', function (e) { e.preventDefault(); water.cam.dist = Math.min(80, Math.max(6, water.cam.dist * Math.exp(e.deltaY * 0.001))); }, { passive: false });
   var KEYS = { ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down', ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right' };
   window.addEventListener('keydown', function (e) { if (KEYS[e.key] && !/INPUT|TEXTAREA/.test(e.target.tagName)) { water.input[KEYS[e.key]] = true; e.preventDefault(); } });
@@ -309,6 +341,12 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
   function tick(now) {
     var dt = Math.min(Math.max((now - last) / 1000, 0), 0.1); last = now;
     if (water.opts.mode === 'side') water.camera2d.x += ((water.input.right ? 1 : 0) - (water.input.left ? 1 : 0)) * 260 * dt;
+    if (steer && water.opts.mode === 'top' && water.boat) {   // steer toward the finger: turn, and sail while it is ahead
+      var rr = canvas.getBoundingClientRect(), tw = water.screenToWorld(steer.x - rr.left, steer.y - rr.top), bt = water.boat;
+      var turn = ((Math.atan2(tw.y - bt.y, tw.x - bt.x) - bt.heading) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+      water.input.left = turn < -0.12; water.input.right = turn > 0.12;
+      water.input.up = Math.hypot(tw.x - bt.x, tw.y - bt.y) > 5 && Math.abs(turn) < 2.2;
+    }
     water.update(dt); water.render();
     if (audio && audio.ctx.state === 'running') {
       var t = audio.ctx.currentTime, w = water.opts.wind / 10, surf = water.opts.mode === 'top' ? 0.06 : 0.1 + 0.06 * Math.sin(water.time * 0.55);

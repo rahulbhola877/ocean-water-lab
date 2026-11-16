@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.0
+
+- **Water Lite 2.2:** the weak spots from 2.1, fixed.
+  - **Top-down sunsets stay readable:** a low sun no longer leaves the map dark. The top view lights from at least about 35° up and keeps the sun's direction and long shadows, so pixel art keeps green islands at sunset.
+  - **Big maps stay sharp:** full detail up to nine times the standard area. Ripples are simulated only around the view, with a soft edge, so a zoomed-in big map costs about what the standard one does. Big maps are also faster to generate.
+  - **Lightning on your terms:** `lightning` sets random strikes a minute (0 turns them off, any rate in any mood).
+  - **Old phones:** every animation phase is worked out on the CPU and kept small, so medium-precision GPUs keep animating smoothly. The rain overlay no longer needs large numbers. The 3D sea's texture coordinates are taken near the camera. `stats.gpu` and `stats.highp` say what the device has.
+  - **Floating things collide:** in the side view they push apart and tip off each other; in the top view the boat shoves crates aside.
+  - **Your own 3D islands:** `islands: [{ x, z, r, hill }]`.
+  - **Steadier shoreline:** a tighter depth range doubles precision where beach meets sea.
+  - **Demo on phones:** settings fold into a bottom sheet, the hint and frame counter no longer overlap, hold to steer the boat, and **Test this device** names the GPU.
+
 ## 1.3.0
 
 - **Water Lite 2.1:** the gaps a real game hits.

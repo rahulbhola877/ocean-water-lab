@@ -59,11 +59,16 @@ Every style keeps its own look. Palette styles get a gentler mood, so dark scene
 - rings spreading on the 3D sea and the top-down water
 - drops landing in the top view's ripple simulation, and little kicks and spray on the side view's surface
 
-Call `water.lightning(strength, x)` to strike now, in any mood. `x` runs from 0 to 1 across the view.
+Lightning:
+
+- `lightning` sets random strikes a minute. -1 (the default) uses the mood's own: about 8 in a storm, none otherwise. 0 turns random strikes off, and any other number works in any mood, for a dry thunderstorm at sunset.
+- Call `water.lightning(strength, x)` to strike now, in any mood. `x` runs from 0 to 1 across the view.
 
 ## Try it
 
 Open `lite/index.html` in a browser. The demo has every option, and **Copy code** gives you the exact `new WaterLite(...)` call for what you see.
+
+On a phone the settings fold into a sheet at the bottom, so the water stays in view. In the top view, press and hold to steer the boat toward your finger, or use WASD and the arrow keys on a keyboard.
 
 ## Use it
 
@@ -94,9 +99,13 @@ Open `lite/index.html` in a browser. The demo has every option, and **Copy code*
   - Side view: `{ height }` at `x` in view units (up is positive).
   - Top view: the ripple height at world `x, y`.
 - **Things floating.** `water.addFloater(x, y, { kind, size, density })` adds a body that the engine simulates and draws.
-  - Side view: `crate`, `barrel`, `duck`, `boat`.
-  - Top view: `crate`, `barrel`.
+  - Side view: `crate`, `barrel`, `duck`, `boat`. They push each other apart, and nothing balances on a floating crate for long.
+  - Top view: `crate`, `barrel`. They bump into each other, and the boat shoves them out of its way.
   - 3D: `crate`, `barrel`, `buoy`.
+- **Your own 3D islands.** `islands: [{ x, z, r, hill }, ...]` in metres replaces the layout made from `seed`.
+  - The terrain grows to fit them.
+  - The boat circles the first island.
+  - Up to six islands calm the waves inside their reefs.
 - **Splashes.** `water.splash(x, y, power, radius)` makes waves, ripples or foam, and scares nearby fish.
 - **Your own map.** `land: function (u, v) { return isLand(u, v); }` gives the top view your tilemap, with `u` and `v` running from 0 to 1 across the map. The function can also return a height. Beaches, the shelving seabed, coastline foam and depth colours all come from it.
 - **Steering the boat.** In the top view, set `water.input.up`, `.down`, `.left` and `.right` to true or false. The demo maps WASD and the arrow keys to these. `water.boat` is the boat of the current view (its `x`, `y` in the top view, `x`, `z` in 3D), or null.
@@ -113,7 +122,11 @@ The demo's **Sound** button makes surf, rain, splashes and thunder with WebAudio
   - The hills, reef and clouds scroll slower than the water, for depth.
   - The cliff stays at the left end of the world and the dock at the right end.
   - Floating things, fish and splashes live in world units.
-- **Top view.** Set `mapSize: [w, h]` for a bigger map; it gets more islands, floating things and fish. Then:
+- **Top view.** Set `mapSize: [w, h]` for a bigger map; it gets more islands, floating things and fish.
+  - The map keeps full detail up to nine times the standard area, for example 480 × 270.
+  - Ripples are only simulated around the view, so a zoomed-in big map costs about what the standard one does.
+
+  Then:
   - `zoom` above 1 shows part of the map (2 shows half its width).
   - `water.camera2d.x` and `.y` set the middle of the view. The view always stays inside the map.
   - `water.camera2d.follow = water.boat` (or your player, or anything with `x` and `y`) makes the camera glide after it.
@@ -125,11 +138,12 @@ The demo's **Sound** button makes surf, rain, splashes and thunder with WebAudio
 - **`quality: 'auto'`** runs `low`'s simulation and adjusts the drawing resolution from frame times, between 40 % and 100 % of the canvas:
   - It drops the 3D island reflections when it has to go low.
   - It assumes you render every animation frame. If drawing less doesn't speed things up (the game is CPU-bound, or capped at 30 fps), it notices and aims for the rate you actually run.
-- **`water.stats`** gives `{ fps, scale, lowW, lowH, px }`: the measured frame rate, the drawing scale, and the internal resolution.
+- **`water.stats`** gives `{ fps, scale, lowW, lowH, px, gpu, highp }`: the measured frame rate, the drawing scale, the internal resolution, the GPU's name, and whether its fragment shaders have high precision.
+- **Old phones.** Some old phone GPUs only have medium precision in fragment shaders, which loses a growing time value within a minute or two. Every animation phase is therefore worked out on the CPU and handed to the shaders as a small number, so animation stays smooth there. The 3D sea also takes its texture coordinates relative to a point near the camera.
 - **`water.benchmark(frames)`** times each preset on the device and returns `{ ms: { potato, low, medium, high }, recommended }`.
   - `recommended` is the best preset that leaves 40 % of the frame for your game.
   - It blocks for a moment and resets the scene, so run it once before play and keep the result, for example in `localStorage`.
-  - The demo's **Test this device** button does this.
+  - The demo's **Test this device** button does this, and names the GPU.
 
 ### Lost GPU context
 
@@ -156,6 +170,7 @@ Pass options to the constructor, or change them later with `water.setOptions({..
 | `quality` | `'low'` | `'potato'`, `'low'`, `'medium'`, `'high'`, or `'auto'` (see above) |
 | `mood` | `'day'` | `'day'`, `'sunset'`, `'night'`, `'storm'` |
 | `rain` | `-1` | 0 to 1; -1 uses the mood's own (storms rain) |
+| `lightning` | `-1` | random strikes a minute; 0 turns them off; -1 uses the mood's own (about 8 in storms) |
 | `clarity` | `1` | how far you see into the water; 2 sees twice as deep |
 | `reflections` | `true` | islands mirrored in the 3D sea (from `low` up); the world above mirrored near the surface in the side view |
 | `palette` | `'auto'` | `'none'`, `'pico8'`, `'sweetie16'`, `'gameboy'`, `'ocean8'`, `'mono'`; `'auto'` uses the style's own |
@@ -174,6 +189,7 @@ Pass options to the constructor, or change them later with `water.setOptions({..
 | `mapSize` | `[160, 90]` | top view: the map's size in world units |
 | `zoom` | `1` | top view: 1 shows the whole map, 2 half its width |
 | `worldWidth` | `480` | side view: the world's width; wider scrolls with `camera2d.x` |
+| `islands` | `null` | 3D: your own layout, `[{ x, z, r, hill }, ...]` in metres; null makes one from `seed` |
 | `seed` | `7` | changes waves, islands and the top-view map |
 | `floaters`, `boat` | `true` | the built-in floating objects and boat |
 
@@ -214,33 +230,32 @@ Other methods: `resize()`, `config()` (current options as JSON), `clearFloaters(
 
 If a device struggles, try `quality: 'potato'` or a pixel style: both cut the pixels drawn by four or more.
 
-About 156 KB of source, 112 KB minified, 39 KB gzipped. Most of that is shader text.
+About 166 KB of source, 117 KB minified, 41 KB gzipped. Most of that is shader text.
 
 ## Honest limits
 
 - **3D**
   - The sea is a sum of Gerstner waves, not an FFT ocean. For that, use the main lab in this repository.
-  - The island layout comes from `seed` and cannot be edited yet.
+  - Islands are round with noisy coasts; there are no other shapes yet.
   - Floating objects use a spring float, not full rigid-body physics.
-  - At a distance the beach and the sea can flicker where they meet, from depth-buffer precision.
+  - Far away, the line where beach meets sea can shimmer a little.
 - **Side view**
   - The surface is a height field, so waves cannot curl over.
-  - Bodies collide with the cliff, the dock posts and the seabed, not with each other.
+  - Bodies push each other apart as boxes that ignore their tilt, so a tipped crate can overlap a neighbour a little.
   - The scenery (cliff, dock, reef) is fixed. Turn `scenery` off to draw your own.
 - **Top view**
   - Ripples are a wave equation, not shallow-water flow, so there are no currents.
-  - Big maps keep the preset's ripple-grid density up to four times the standard map's cells, then get coarser. Zoomed far in, coasts stay organic but ripples get soft.
-- **Moods**
-  - Lightning strikes at random in storms. You can add your own with `lightning()` but not stop the random ones, short of another mood.
-  - With a palette, a sunset seen top-down can leave island interiors dark and dithered, because Sweetie 16 has no olive green to land on.
+  - Maps bigger than nine times the standard area get a coarser grid. Zoomed far in, coasts stay organic but ripples get soft.
+  - On a tall phone screen, the map is cropped to a narrow strip at zoom 1; follow the boat or your player.
 - **All views**
   - Built-in objects are simple shapes. For your own sprites, use `sample()` and draw them yourself.
-  - On very old phones whose GPUs have only medium precision in fragment shaders, fine texture detail can look blocky.
+  - On very old phones whose GPUs have only medium precision in fragment shaders, fine texture detail far from the camera can look blocky. Animation stays smooth.
   - Without `OES_standard_derivatives`, low poly falls back to smooth shading and ink lines get a fixed width.
 - **Testing.**
-  - Headless Chromium with a software renderer: `tools/lite-smoke.mjs` (31 checks) and `tools/lite-shots.mjs`.
+  - Headless Chromium with a software renderer: `tools/lite-smoke.mjs` (38 checks) and `tools/lite-shots.mjs`.
   - One real laptop GPU, Intel UHD Graphics (Direct3D 11 through ANGLE): all 72 view, style and mood combinations render cleanly. At 1280 × 720, a `low` frame takes about 8 ms in the 2D views and 13 ms in 3D, measured with a GPU sync after each frame.
-  - Not yet tried on a range of low-end phones. Reports are welcome.
+  - The demo was checked in an emulated phone (Pixel 5 screen and touch). The medium-precision path can't be tried on a desktop GPU, which always computes in full precision.
+  - Not yet tried on a range of real low-end phones. Reports are welcome: the demo's **Test this device** gives the numbers and the GPU's name.
 
 ## Building
 
