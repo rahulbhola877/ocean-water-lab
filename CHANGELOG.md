@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+- **Water Lite 2:** rebuilt around clear, see-through water.
+  - **Layered rendering:** everything under the surface is drawn first. The water then refracts it, tints it by depth with per-colour absorption, and lights it with caustics traced through the ripples. Shoreline foam comes from the real water depth.
+  - **3D:** islands with beaches, palms and rocks; a shallow lagoon calmed by the reef; reflections of the islands; shadows of floating things on the sand.
+  - **Side view:** a reef, seaweed, fish, a cliff and a dock seen through the water, plus light shafts and the world above mirrored near the surface.
+  - **Top view:** an elevation map with a visible seabed, waves washing up the beach, rock heads, fish in the shallows, and shadows on the bottom.
+  - **New options:** `clarity`, `reflections` and a `tint` colour.
+  - **Better stylized looks:** pixel art saturates before snapping to the palette; toon and pixel water comes in clean depth steps.
+
 ## 1.1.0
 
 - **Water Lite** (`lite/`): a separate, single-file engine for low-end and stylized browser games.

@@ -66,10 +66,11 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 
 [`lite/`](lite/) is a second, separate engine for browser games that have to run on weak hardware or want a particular art style. It is one JavaScript file on WebGL 1 with no dependencies.
 
-- **Three views:** a 3D ocean, a 2D side view and a 2D top-down view.
+- **Clear water.** Everything under the surface is drawn first: seabed, rocks, seaweed, fish and the sunken half of floating things. The water then bends it, tints it by depth and lights it with moving caustics.
+- **Three views:** a 3D island lagoon, a 2D side view and a 2D top-down view.
 - **Six art styles:** realistic, toon, pixel art, low poly, retro and ink.
-- **Pixel art in whole pixels**, with retro palettes and clean ordered dithering.
-- **The same physics in every style:** things float, boats leave wakes, and ripples bounce off coasts.
+- **Pixel art in whole pixels,** with retro palettes and clean ordered dithering.
+- **The same physics in every style:** things float, boats leave wakes, ripples bounce off coasts, and waves wash up beaches.
 
 ![Water Lite in three views and six art styles](media/lite-grid.jpg)
 

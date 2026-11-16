@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Water Lite: stylized water for low-end games</title>
+<title>Water Lite: clear, stylized water for low-end games</title>
 <style>
 :root {
   /* a light, game-tool panel: the water is the colourful part */
@@ -55,7 +55,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
 <canvas id="water" tabindex="0" aria-label="Water simulation. Click to splash or drop things."></canvas>
 
 <div class="panel" role="region" aria-label="Water Lite settings">
-  <h1>Water Lite <span>Stylized water for low-end browser games</span></h1>
+  <h1>Water Lite <span>Clear, stylized water for low-end browser games</span></h1>
   <div>
     <h2>View</h2>
     <div class="seg" id="modes">
@@ -103,6 +103,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="1" max="20" step="0.5"><output id="o-wind"></output></div>
     <div class="row"><label for="waveHeight">Wave height</label><input id="waveHeight" type="range" min="0.1" max="2.5" step="0.05"><output id="o-waveHeight"></output></div>
     <div class="row"><label for="choppiness">Choppiness</label><input id="choppiness" type="range" min="0" max="1" step="0.05"><output id="o-choppiness"></output></div>
+    <div class="row"><label for="clarity">Clarity</label><input id="clarity" type="range" min="0.3" max="3" step="0.05"><output id="o-clarity"></output></div>
     <div class="row"><label for="foam">Foam</label><input id="foam" type="range" min="0" max="2" step="0.05"><output id="o-foam"></output></div>
     <div class="row"><label for="sunElevation">Sun height</label><input id="sunElevation" type="range" min="3" max="80" step="1"><output id="o-sunElevation"></output></div>
   </div>
@@ -110,6 +111,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     <h2>Scene</h2>
     <div class="chips" id="toggles">
       <button type="button" data-toggle="scenery">Scenery</button>
+      <button type="button" data-toggle="reflections">Reflections</button>
       <button type="button" data-toggle="boat">Boat</button>
       <button type="button" data-toggle="floaters">Floating things</button>
       <button type="button" id="new-map">New map</button>
@@ -145,19 +147,19 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
 (function () {
   'use strict';
   var canvas = document.getElementById('water'), water;
-  try { water = new WaterLite(canvas, { mode: 'side', style: 'pixel', quality: 'low', transparent: true }); }
+  try { water = new WaterLite(canvas, { mode: '3d', style: 'realistic', quality: 'low', transparent: true }); }
   catch (e) { var er = document.getElementById('err'); er.style.display = 'flex'; er.textContent = 'This device cannot run WebGL: ' + e.message; return; }
   window.waterLite = water;
   var HINTS = {
-    '3d': 'Drag to look around · scroll to zoom · click the sea to drop a crate',
+    '3d': 'Drag to look around · scroll to zoom · click the water to drop a crate',
     side: 'Click to drop crates, barrels and ducks · drag across the water to make waves',
-    top: 'WASD or arrows to sail the boat · click to make ripples'
+    top: 'WASD or arrows to sail the boat · click to make ripples · fish scatter from the boat'
   };
   function $(id) { return document.getElementById(id); }
-  var SLIDERS = ['pixelSize', 'dither', 'wind', 'waveHeight', 'choppiness', 'foam', 'sunElevation'];
+  var SLIDERS = ['pixelSize', 'dither', 'wind', 'waveHeight', 'choppiness', 'clarity', 'foam', 'sunElevation'];
   var FMT = { pixelSize: function (v) { return v === 0 ? 'style' : v + ' px'; }, dither: function (v) { return v < 0 ? 'style' : v.toFixed(2); },
     wind: function (v) { return v.toFixed(1) + ' m/s'; }, waveHeight: function (v) { return v.toFixed(2) + '×'; }, choppiness: function (v) { return v.toFixed(2); },
-    foam: function (v) { return v.toFixed(2) + '×'; }, sunElevation: function (v) { return Math.round(v) + '°'; } };
+    clarity: function (v) { return v.toFixed(2) + '×'; }, foam: function (v) { return v.toFixed(2) + '×'; }, sunElevation: function (v) { return Math.round(v) + '°'; } };
   function sync() {
     var o = water.opts;
     document.querySelectorAll('[data-mode]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.mode === o.mode)); });

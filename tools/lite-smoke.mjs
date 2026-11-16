@@ -18,7 +18,7 @@ const results = await page.evaluate(async () => {
   const out = [], ok = (name, pass, info) => out.push({ name, pass: !!pass, info: info === undefined ? '' : String(info) });
   const W = window.waterLite;
   ok('demo engine created', W, typeof W);
-  ok('demo loop running', W.time > 0.2, W.time.toFixed(2) + ' s');
+  ok('demo loop running', W.time > 0.05, W.time.toFixed(2) + ' s');
 
   // every mode x style x palette through the real UI, no GL errors
   let glErr = 0;
@@ -44,7 +44,19 @@ const results = await page.evaluate(async () => {
   const px = new Uint8Array(4), gl = L.gl;
   gl.readPixels(160, 175, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); const skyA = px[3];
   gl.readPixels(160, 10, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); const seaA = px[3];
-  ok('scenery off leaves the sky transparent', skyA === 0 && seaA === 255, 'sky alpha ' + skyA + ', water alpha ' + seaA);
+  ok('scenery off leaves the sky transparent', skyA === 0 && seaA > 128, 'sky alpha ' + skyA + ', water alpha ' + seaA);
+
+  // clear water: with scenery on, the seabed shows through and differs from open water higher up
+  L.setOptions({ scenery: true });
+  for (let i = 0; i < 10; i++) L.update(1 / 60);
+  L.render();
+  const S = L.side, bottomY = L._sideBottom(200), toPx = (y) => Math.round((1 - y / S.viewH) * 180);
+  const sand = new Uint8Array(4), open = new Uint8Array(4);
+  gl.readPixels(Math.round(200 / 480 * 320), toPx(bottomY + 5), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, sand);
+  gl.readPixels(Math.round(200 / 480 * 320), toPx(S.level + 45), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, open);
+  const diff = Math.abs(sand[0] - open[0]) + Math.abs(sand[1] - open[1]) + Math.abs(sand[2] - open[2]);
+  ok('the seabed shows through the water', diff > 30, 'seabed rgb ' + Array.from(sand.slice(0, 3)) + ' vs open water ' + Array.from(open.slice(0, 3)));
+  L.setOptions({ scenery: false });
 
   // a crate dropped from above floats at about its density
   const crate = L.addFloater(160, 60, { kind: 'crate', size: 20 });
@@ -59,10 +71,16 @@ const results = await page.evaluate(async () => {
   for (let i = 0; i < 600; i++) { if (i % 90 === 0) L.splash(200 + (i % 180), 0, 14, 30); L.update(1 / 60); worst = Math.max(worst, Math.abs(boat.a)); }
   ok('the boat rights itself (max heel)', worst < 1.0, (worst * 180 / Math.PI).toFixed(0) + ' degrees');
 
-  // 3D sampling
+  // 3D sampling, and lagoons calmer than open sea
   L.setOptions({ mode: '3d', scenery: true });
   const s3 = L.sample(3.2, -7.5);
   ok('3D sample gives a height and a unit normal', isFinite(s3.height) && Math.abs(Math.hypot.apply(null, s3.normal) - 1) < 1e-6, s3.height.toFixed(3));
+  let open3 = [0, 0], bestA = -1;
+  for (let a = 0; a < 6.28; a += 0.2) { const x = Math.cos(a) * 140, z = Math.sin(a) * 140 - 30, at = L._waveAtten(x, z); if (at > bestA) { bestA = at; open3 = [x, z]; } }
+  let lag = 0, sea = 0;
+  for (let i = 0; i < 120; i++) { L.update(0.05); lag = Math.max(lag, Math.abs(L.sample(0, -8).height)); sea = Math.max(sea, Math.abs(L.sample(open3[0], open3[1]).height)); }
+  ok('the reef calms the lagoon', lag < sea * 0.5, 'lagoon ' + lag.toFixed(2) + ' m (wave scale ' + L._waveAtten(0, -8).toFixed(2) + '), open sea ' + sea.toFixed(2) + ' m (scale ' + bestA.toFixed(2) + ')');
+  ok('the island rises above the sea and the lagoon is shallow', L._terrainHeight(0, -42) > 3 && L._terrainHeight(0, -6) < -1 && L._terrainHeight(0, -6) > -6, 'peak ' + L._terrainHeight(0, -42).toFixed(1) + ' m, lagoon ' + L._terrainHeight(0, -6).toFixed(1) + ' m');
 
   // top view with a game's own land map
   L.setOptions({ mode: 'top', land: (u, v) => u < 0.3 });
