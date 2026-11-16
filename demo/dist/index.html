@@ -182,6 +182,7 @@ body.nogl .panel, body.nogl .forecast, body.nogl .hint, body.failed .panel, body
       <button type="button" id="tour-rec">Record tour</button>
       <button type="button" id="rec-free">Record</button>
       <button type="button" data-toggle="sound">Sound</button>
+      <button type="button" id="rec-save" hidden>Save last video</button>
     </div>
     <div class="tabs">
       <button type="button" data-tab="quick" aria-pressed="true">Quick</button>
@@ -3989,6 +3990,24 @@ window.WATER_SHADERS = {"foam_sim.frag":"#ifndef WATER_FOAM_DEPTH\n#define WATER
   }
 
   var rec = { on: false, mr: null, chunks: [], cv: null, cx: null, t0: 0, type: '', blob: null, url: '' };
+  // Hand a file to the viewer: through the artifact viewer's downloads capability when the
+  // page runs inside claude.ai, otherwise as an ordinary browser download.
+  var downloadsApi = null;
+  if (window.claude && typeof window.claude.use === 'function') {
+    try { window.claude.use('downloads').then(function (d) { downloadsApi = d; }, function () {}); } catch (e) { /* not in a viewer */ }
+  }
+  function saveFile(filename, blob, done) {
+    if (downloadsApi) {
+      downloadsApi.save({ filename: filename, data: blob }).then(function () { done && done(true); },
+        function (err) { done && done(false, err && err.code); });
+      return;
+    }
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    done && done(true);
+  }
   function startRecording(w, h) {
     if (!window.MediaRecorder) { $('note').textContent = 'This browser cannot record video.'; return false; }
     rec.cv = document.createElement('canvas'); rec.cv.width = w; rec.cv.height = h; rec.cx = rec.cv.getContext('2d');
@@ -4001,11 +4020,13 @@ window.WATER_SHADERS = {"foam_sim.frag":"#ifndef WATER_FOAM_DEPTH\n#define WATER
     rec.mr.ondataavailable = function (e) { if (e.data && e.data.size) rec.chunks.push(e.data); };
     rec.mr.onstop = function () {
       rec.blob = new Blob(rec.chunks, { type: rec.type || 'video/webm' });
-      if (rec.url) URL.revokeObjectURL(rec.url);
-      rec.url = URL.createObjectURL(rec.blob);
-      var a = document.createElement('a'); a.href = rec.url; a.download = 'ocean-water-lab-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + (/mp4/.test(rec.type) ? '.mp4' : '.webm');
-      document.body.appendChild(a); a.click(); a.remove();
-      $('note').textContent = 'Saved ' + (rec.blob.size / 1048576).toFixed(1) + ' MB video (' + (/mp4/.test(rec.type) ? 'MP4' : 'WebM') + ').';
+      var name = 'ocean-water-lab-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + (/mp4/.test(rec.type) ? '.mp4' : '.webm');
+      var mb = (rec.blob.size / 1048576).toFixed(1);
+      $('note').textContent = 'Recorded ' + mb + ' MB. Saving…';
+      saveFile(name, rec.blob, function (ok, code) {
+        $('note').textContent = ok ? 'Saved ' + mb + ' MB video (' + (/mp4/.test(rec.type) ? 'MP4' : 'WebM') + ').' : 'The video was not saved (' + (code || 'cancelled') + '). Use Save last video to try again.';
+        $('rec-save').hidden = false;
+      });
     };
     rec.mr.start(1000); rec.on = true; rec.t0 = performance.now();
     perf.locked = true; quality.scale = 1;
@@ -4212,9 +4233,8 @@ window.WATER_SHADERS = {"foam_sim.frag":"#ifndef WATER_FOAM_DEPTH\n#define WATER
       else { ta.select(); document.execCommand('copy'); done(); }
     });
     $('export-save').addEventListener('click', function () {
-      var ext = { json: 'json', kit: 'txt', unity: 'cs', unreal: 'txt', godot: 'gd' }[exportFmt];
-      var a = el('a', { href: URL.createObjectURL(new Blob([$('export-text').value], { type: 'text/plain' })), download: 'ocean-' + (state.scene || 'custom') + '.' + ext });
-      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      var ext = { json: 'json', kit: 'txt', unity: 'txt', unreal: 'txt', godot: 'txt' }[exportFmt];
+      saveFile('ocean-' + (state.scene || 'custom') + '-' + exportFmt + '.' + ext, new Blob([$('export-text').value], { type: 'text/plain' }));
     });
     $('import-load').addEventListener('click', function () {
       try { importSettings(JSON.parse($('import-text').value)); $('import-load').textContent = 'Loaded'; }
@@ -4315,6 +4335,12 @@ window.WATER_SHADERS = {"foam_sim.frag":"#ifndef WATER_FOAM_DEPTH\n#define WATER
       setTimeout(function () { if (startRecording(1920, 1080)) startTour(function () { setTimeout(stopRecording, 300); }); syncUI(); }, 200);
     });
     $('rec-free').addEventListener('click', function () { if (rec.on) stopRecording(); else startRecording(1920, 1080); syncUI(); });
+    $('rec-save').addEventListener('click', function () {
+      if (!rec.blob) return;
+      saveFile('ocean-water-lab-' + Date.now() + (/mp4/.test(rec.type) ? '.mp4' : '.webm'), rec.blob, function (ok, code) {
+        $('note').textContent = ok ? 'Saved.' : 'Not saved (' + (code || 'cancelled') + ').';
+      });
+    });
     $('helm').addEventListener('click', function () {
       state.boat = true; state.follow = true; state.autopilot = false; ensureBoat();
       cam.tDist = state.vessel === 'ship' ? 46 : 15; cam.tPitch = clamp(cam.tPitch, 0.12, 0.3);
