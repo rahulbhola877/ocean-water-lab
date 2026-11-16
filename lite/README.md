@@ -237,7 +237,10 @@ About 156 KB of source, 112 KB minified, 39 KB gzipped. Most of that is shader t
   - Built-in objects are simple shapes. For your own sprites, use `sample()` and draw them yourself.
   - On very old phones whose GPUs have only medium precision in fragment shaders, fine texture detail can look blocky.
   - Without `OES_standard_derivatives`, low poly falls back to smooth shading and ink lines get a fixed width.
-- **Testing.** It was tested in headless Chromium with a software renderer (see `tools/lite-smoke.mjs` and `tools/lite-shots.mjs`), not yet on a range of real low-end phones. Reports are welcome.
+- **Testing.**
+  - Headless Chromium with a software renderer: `tools/lite-smoke.mjs` (31 checks) and `tools/lite-shots.mjs`.
+  - One real laptop GPU, Intel UHD Graphics (Direct3D 11 through ANGLE): all 72 view, style and mood combinations render cleanly. At 1280 × 720, a `low` frame takes about 8 ms in the 2D views and 13 ms in 3D, measured with a GPU sync after each frame.
+  - Not yet tried on a range of low-end phones. Reports are welcome.
 
 ## Building
 
