@@ -1,0 +1,12 @@
+node_modules/
+media/shots/
+media/video/
+*.mp4
+*.webm
+*.mov
+.DS_Store
+Thumbs.db
+kit/tests/shim/
+kit/tests/crosscheck
+kit/tests/crosscheck.exe
+__pycache__/

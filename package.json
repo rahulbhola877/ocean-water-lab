@@ -1,0 +1,19 @@
+{
+  "name": "ocean-water-lab",
+  "version": "1.0.0",
+  "description": "Real-time ocean for games: FFT waves, surf, weather, buoyancy, with GLSL/HLSL/C++/C# sources and an in-browser lab",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node demo/build.mjs",
+    "hlsl": "python3 tools/gen_hlsl.py",
+    "test": "node tools/smoke.mjs",
+    "test:fft": "node kit/tests/fft_check.mjs",
+    "shots": "node tools/shots.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  },
+  "keywords": ["ocean", "water", "fft", "tessendorf", "webgl2", "glsl", "hlsl", "buoyancy", "game-dev", "shader"]
+}
