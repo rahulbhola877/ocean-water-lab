@@ -19,7 +19,9 @@ Open `demo/dist/index.html` in Chrome, Edge, Firefox or Safari. It is one self-c
 - **Take the helm:** pick Speedboat or Pirate ship, then press *Take the helm*.
   - Speedboat: W/S throttle, A/D steer, Shift boost.
   - Ship: W/S set more or less sail, A/D rudder, Space fires a broadside, Q/E fire port or starboard.
-- **Play tour:** a cinematic run through every look. *Record tour* saves it as a 1080p video with sound. *Record* captures whatever you do.
+- **Play tour:** a cinematic run through every look.
+  - *Render film* draws the tour frame by frame and encodes a smooth 1080p MP4 with sound (WebCodecs), however slow your GPU is.
+  - *Record tour* and *Record* capture in real time instead.
 - **Advanced:** every parameter, grouped: waves, foam, optics, shore, sky, weather, camera + grade, physics + vessels.
 - **Export:** the current look as JSON, as exact kit uniforms, or as the closest Unity HDRP, Unreal Water or Godot settings. Paste JSON back in to load a look.
 
@@ -120,6 +122,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Engine ports, real-GPU performance numbe
 - Hillaire 2020, sky and atmosphere
 - Schneider 2015, *Horizon Zero Dawn* clouds
 - Green's law and breaker index from standard coastal engineering texts
+
+## Third-party code
+
+The demo inlines [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) 5.2.2 by Vanilagy (MIT, see `demo/src/vendor/mp4-muxer.LICENSE`) to write the MP4 files.
 
 ## License
 

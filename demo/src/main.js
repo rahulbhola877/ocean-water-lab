@@ -956,7 +956,7 @@
   function resizeTargets() {
     var dpr = Math.min(window.devicePixelRatio || 1, 1.75);
     var cw = Math.max(2, Math.round(canvas.clientWidth * dpr)), ch = Math.max(2, Math.round(canvas.clientHeight * dpr));
-    if (rec.on) { cw = rec.cv.width; ch = rec.cv.height; quality.scale = 1; }      // recordings are always full HD, whatever the window
+    if (rec.on || film.on) { cw = film.on ? film.w : rec.cv.width; ch = film.on ? film.h : rec.cv.height; quality.scale = 1; }      // recordings are full HD, whatever the window
     if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
     if (!quality.started) {                         // first frame: aim for about 1080p worth of pixels
       quality.started = true;
@@ -2124,7 +2124,7 @@
   // ===========================================================================
   //  sound: procedural, driven by the same state as the picture
   // ===========================================================================
-  var audio = { ctx: null, on: false, n: {}, dest: null };
+  var audio = { ctx: null, on: false, n: null, dest: null };
   function noiseBuffer(ctx, seconds, kind) {
     var len = Math.floor(ctx.sampleRate * seconds), buf = ctx.createBuffer(2, len, ctx.sampleRate);
     for (var ch = 0; ch < 2; ch++) {
@@ -2138,16 +2138,14 @@
     }
     return buf;
   }
-  function startAudio() {
-    if (audio.ctx) { audio.ctx.resume(); audio.on = true; return; }
-    var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
-    var ctx = new AC(), n = audio.n;
+  // The mix: sea roar, wash, wind, rain beds, an engine, into a compressor. Built the same
+  // way for the live context and for an offline one (film renders).
+  function buildAudioGraph(ctx) {
+    var n = { ctx: ctx, buf: { brown: noiseBuffer(ctx, 5, 'brown'), pink: noiseBuffer(ctx, 5, 'pink'), white: noiseBuffer(ctx, 3, 'white') } };
     n.master = ctx.createGain(); n.master.gain.value = 0.9;
     n.under = ctx.createBiquadFilter(); n.under.type = 'lowpass'; n.under.frequency.value = 18000;
-    var comp = ctx.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 3;
-    n.master.connect(n.under); n.under.connect(comp); comp.connect(ctx.destination);
-    audio.dest = ctx.createMediaStreamDestination(); comp.connect(audio.dest);
-    var brown = noiseBuffer(ctx, 5, 'brown'), pink = noiseBuffer(ctx, 5, 'pink'), white = noiseBuffer(ctx, 3, 'white');
+    n.comp = ctx.createDynamicsCompressor(); n.comp.threshold.value = -16; n.comp.ratio.value = 3;
+    n.master.connect(n.under); n.under.connect(n.comp); n.comp.connect(ctx.destination);
     function bed(buf, type, freq, q) {
       var s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.loopStart = Math.random();
       var f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q || 0.7;
@@ -2155,60 +2153,80 @@
       s.connect(f); f.connect(g); g.connect(n.master); s.start();
       return { f: f, g: g };
     }
-    n.sea = bed(brown, 'lowpass', 500);                  // the low roar of open water
-    n.wash = bed(pink, 'bandpass', 900, 0.5);            // waves breaking, foam fizzing
-    n.wind = bed(pink, 'bandpass', 500, 1.4);
-    n.rain = bed(white, 'highpass', 2600);
+    n.sea = bed(n.buf.brown, 'lowpass', 500);              // the low roar of open water
+    n.wash = bed(n.buf.pink, 'bandpass', 900, 0.5);        // waves breaking, foam fizzing
+    n.wind = bed(n.buf.pink, 'bandpass', 500, 1.4);
+    n.rain = bed(n.buf.white, 'highpass', 2600);
     n.eng = ctx.createGain(); n.eng.gain.value = 0;
     var ef = ctx.createBiquadFilter(); ef.type = 'lowpass'; ef.frequency.value = 520; ef.Q.value = 2;
     n.o1 = ctx.createOscillator(); n.o1.type = 'sawtooth'; n.o2 = ctx.createOscillator(); n.o2.type = 'square';
     n.o1.connect(ef); n.o2.connect(ef); ef.connect(n.eng); n.eng.connect(n.master); n.o1.start(); n.o2.start();
-    audio.brown = brown; audio.white = white;
+    return n;
+  }
+  function startAudio() {
+    if (audio.ctx) { audio.ctx.resume(); audio.on = true; return; }
+    var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    var ctx = new AC();
+    audio.n = buildAudioGraph(ctx);
+    audio.dest = ctx.createMediaStreamDestination(); audio.n.comp.connect(audio.dest);
     audio.ctx = ctx; audio.on = true;
   }
   function stopAudio() { if (audio.ctx) audio.ctx.suspend(); audio.on = false; }
-  function aset(p, v, tc) { p.setTargetAtTime(v, audio.ctx.currentTime, tc || 0.2); }
-  function oneShot(buf, type, freq, gain, attack, decay, delay, rate) {
-    if (!audio.on) return;
-    var ctx = audio.ctx, t = ctx.currentTime + (delay || 0);
-    var s = ctx.createBufferSource(); s.buffer = buf; s.playbackRate.value = rate || 1;
-    var f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq;
-    var g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(0.0005, t + attack + decay);
-    s.connect(f); f.connect(g); g.connect(audio.n.master); s.start(t, Math.random() * 1.5); s.stop(t + attack + decay + 0.1);
+  // one burst of filtered noise: kind of noise, filter, gain envelope; at time t in context n.ctx
+  function playShot(n, t, a) {
+    var ctx = n.ctx, s = ctx.createBufferSource(); s.buffer = n.buf[a[0]]; s.playbackRate.value = a[6] || 1;
+    var f = ctx.createBiquadFilter(); f.type = a[1]; f.frequency.value = a[2];
+    var g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(a[3], t + a[4]); g.gain.exponentialRampToValueAtTime(0.0005, t + a[4] + a[5]);
+    s.connect(f); f.connect(g); g.connect(n.master); s.start(t, Math.random() * 1.5); s.stop(t + a[4] + a[5] + 0.1);
+  }
+  function oneShot(kind, type, freq, gain, attack, decay, delay, rate) {
+    var a = [kind, type, freq, gain, attack, decay, rate];
+    if (film.on) { film.events.push({ t: film.time + (delay || 0), a: a }); return; }
+    if (audio.on && audio.n) playShot(audio.n, audio.ctx.currentTime + (delay || 0), a);
   }
   sound.cannon = function () {
     for (var i = 0; i < 5; i++) {
-      oneShot(audio.brown, 'lowpass', 180, 1.6, 0.004, 1.8, i * 0.11, 0.7);
-      oneShot(audio.white, 'lowpass', 2400, 0.5, 0.002, 0.25, i * 0.11);
+      oneShot('brown', 'lowpass', 180, 1.6, 0.004, 1.8, i * 0.11, 0.7);
+      oneShot('white', 'lowpass', 2400, 0.5, 0.002, 0.25, i * 0.11);
     }
   };
-  sound.splash = function (dist) { oneShot(audio.white, 'bandpass', 1300, 0.9 / (1 + dist / 60), 0.01, 0.9, dist / 343); };
+  sound.splash = function (dist) { oneShot('white', 'bandpass', 1300, 0.9 / (1 + dist / 60), 0.01, 0.9, dist / 343); };
   sound.thunder = function (dist) {
     var d = dist / 343, g = clamp(2.2 - dist / 4000, 0.3, 1.8);
-    oneShot(audio.brown, 'lowpass', 260, g, 0.05, 3.5, Math.min(d, 9), 0.6);
-    oneShot(audio.brown, 'lowpass', 120, g * 0.8, 0.4, 5.0, Math.min(d, 9) + 0.3, 0.5);
+    oneShot('brown', 'lowpass', 260, g, 0.05, 3.5, Math.min(d, 9), 0.6);
+    oneShot('brown', 'lowpass', 120, g * 0.8, 0.4, 5.0, Math.min(d, 9) + 0.3, 0.5);
   };
-  function updateAudio() {
-    if (!audio.on || !audio.ctx) return;
-    var n = audio.n, t = audio.ctx.currentTime, hs = Math.min(sea.hs, 8);
-    var height = Math.max(cam.pos[1], 1), near = clamp(1.25 - Math.log(height) / Math.log(300), 0.15, 1.1);
-    var swell = 0.5 + 0.5 * Math.sin(t * TAU / Math.max(sea.tp, 3));
-    var under = cam.underwater ? 1 : 0;
-    aset(n.under.frequency, under ? 420 : 18000, 0.08);
-    aset(n.sea.g.gain, (0.12 + 0.07 * hs) * near * (0.75 + 0.25 * swell));
-    aset(n.sea.f.frequency, 260 + 70 * hs + 200 * swell);
+  // what each part of the mix should be doing now, from the state of the scene
+  function audioTargets(t) {
+    var hs = Math.min(sea.hs, 8), height = Math.max(cam.pos[1], 1), near = clamp(1.25 - Math.log(height) / Math.log(300), 0.15, 1.1);
+    var swell = 0.5 + 0.5 * Math.sin(t * TAU / Math.max(sea.tp, 3)), under = cam.underwater ? 1 : 0;
     var shore = state.surf > 0.01 ? smoothstep(16, 1, depthAt(cam.target[0], cam.target[2])) * clamp(state.surf / 2, 0.25, 1.5) : 0;
     var crash = Math.exp(-5 * ((simTime % state.surfPeriod) / state.surfPeriod));
-    aset(n.wash.g.gain, (0.025 + 0.05 * clamp(state.foam * state.wind / 15, 0, 1.5) + 0.3 * shore * crash) * near, 0.1);
     var gust = 0.7 + 0.3 * Math.sin(t * 0.63) * Math.sin(t * 1.71);
-    aset(n.wind.g.gain, smoothstep(3, 26, state.wind) * 0.32 * gust * (1 - 0.8 * under));
-    aset(n.wind.f.frequency, 260 + state.wind * 28 * gust);
-    aset(n.rain.g.gain, state.rain * 0.22 * (1 - 0.9 * under));
     var b = boat.body, engine = b && !b.isShip && bodies.indexOf(b) >= 0 && state.boat;
     var dist = engine ? Math.hypot(b.pos[0] - cam.pos[0], b.pos[1] - cam.pos[1], b.pos[2] - cam.pos[2]) : 1e9;
-    aset(n.eng.gain, engine ? clamp(10 / (dist + 6), 0, 1) * (0.06 + 0.22 * boat.throttle) : 0, 0.1);
     var f0 = 36 + 64 * boat.throttle + 2.2 * (boat.speed || 0);
-    aset(n.o1.frequency, f0, 0.1); aset(n.o2.frequency, f0 * 1.5 + 1.3, 0.1);
+    return [
+      under ? 420 : 18000,
+      (0.12 + 0.07 * hs) * near * (0.75 + 0.25 * swell), 260 + 70 * hs + 200 * swell,
+      (0.025 + 0.05 * clamp(state.foam * state.wind / 15, 0, 1.5) + 0.3 * shore * crash) * near,
+      smoothstep(3, 26, state.wind) * 0.32 * gust * (1 - 0.8 * under), 260 + state.wind * 28 * gust,
+      state.rain * 0.22 * (1 - 0.9 * under),
+      engine ? clamp(10 / (dist + 6), 0, 1) * (0.06 + 0.22 * boat.throttle) : 0, f0, f0 * 1.5 + 1.3
+    ];
+  }
+  function applyTargets(n, v, t) {
+    n.under.frequency.setTargetAtTime(v[0], t, 0.08);
+    n.sea.g.gain.setTargetAtTime(v[1], t, 0.2); n.sea.f.frequency.setTargetAtTime(v[2], t, 0.2);
+    n.wash.g.gain.setTargetAtTime(v[3], t, 0.1);
+    n.wind.g.gain.setTargetAtTime(v[4], t, 0.2); n.wind.f.frequency.setTargetAtTime(v[5], t, 0.2);
+    n.rain.g.gain.setTargetAtTime(v[6], t, 0.2);
+    n.eng.gain.setTargetAtTime(v[7], t, 0.1); n.o1.frequency.setTargetAtTime(v[8], t, 0.1); n.o2.frequency.setTargetAtTime(v[9], t, 0.1);
+  }
+  function updateAudio() {
+    if (film.on) { if (film.frame % 2 === 0) film.alog.push({ t: film.time, v: audioTargets(film.time) }); return; }
+    if (!audio.on || !audio.ctx) return;
+    applyTargets(audio.n, audioTargets(audio.ctx.currentTime), audio.ctx.currentTime);
   }
 
   // ===========================================================================
@@ -2363,6 +2381,114 @@
   }
 
   // ===========================================================================
+  //  film render: every frame at a fixed time step, encoded with WebCodecs into an
+  //  MP4, so the video is smooth however slowly the GPU draws it. The sound is mixed
+  //  offline afterwards from a log of the live mix and its one-off sounds.
+  // ===========================================================================
+  var film = { on: false, fps: 30, frame: 0, time: 0, w: 1920, h: 1080, cv: null, cx: null, enc: null, mux: null, alog: [], events: [], total: 0, cancel: false, error: null };
+  function filmSupported() { return !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer); }
+  function pickVideoCodec(w, h, fps) {
+    var tries = [['avc', 'avc1.640034'], ['avc', 'avc1.640033'], ['avc', 'avc1.640028'], ['vp9', 'vp09.00.41.08'], ['vp9', 'vp09.00.40.08']];
+    var i = 0;
+    function next() {
+      if (i >= tries.length) return Promise.resolve(null);
+      var c = tries[i++], cfg = { codec: c[1], width: w, height: h, bitrate: 24e6, framerate: fps };
+      return VideoEncoder.isConfigSupported(cfg).then(function (r) { return r.supported ? { mux: c[0], cfg: cfg } : next(); }, next);
+    }
+    return next();
+  }
+  function pickAudioCodec() {
+    if (!window.AudioEncoder || !window.OfflineAudioContext) return Promise.resolve(null);
+    var tries = [['aac', { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 }], ['opus', { codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 160000 }]];
+    var i = 0;
+    function next() {
+      if (i >= tries.length) return Promise.resolve(null);
+      var c = tries[i++];
+      return AudioEncoder.isConfigSupported(c[1]).then(function (r) { return r.supported ? c : next(); }, next);
+    }
+    return next();
+  }
+  function filmStatus(text) { var rs = $('rec-status'); rs.hidden = !text; rs.textContent = text || ''; }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function nextFrame() { return new Promise(function (r) { requestAnimationFrame(function () { r(); }); }); }
+  async function renderFilm(w, h, fps) {
+    if (film.on) { film.cancel = true; return; }
+    if (!filmSupported()) { $('note').textContent = 'This browser has no WebCodecs, so use Record tour (real time) instead.'; return; }
+    var vc = await pickVideoCodec(w, h, fps), ac = await pickAudioCodec();
+    if (!vc) { $('note').textContent = 'No video encoder for ' + w + '×' + h + ' here, so use Record tour instead.'; return; }
+    film.w = w; film.h = h; film.fps = fps; film.frame = 0; film.time = 0; film.alog = []; film.events = []; film.cancel = false; film.error = null;
+    film.total = Math.round(TOUR.reduce(function (a, s) { return a + s.dur; }, 0) * fps);
+    film.cv = document.createElement('canvas'); film.cv.width = w; film.cv.height = h; film.cx = film.cv.getContext('2d');
+    film.mux = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), fastStart: 'in-memory',
+      video: { codec: vc.mux, width: w, height: h, frameRate: fps },
+      audio: ac ? { codec: ac[0], numberOfChannels: 2, sampleRate: 48000 } : undefined });
+    film.enc = new VideoEncoder({ output: function (chunk, meta) { film.mux.addVideoChunk(chunk, meta); }, error: function (e) { film.error = e; } });
+    film.enc.configure(vc.cfg);
+    var liveSound = audio.on; if (liveSound) stopAudio();             // the live mix would not line up with film time
+    film.on = true; perf.locked = true; quality.scale = 1;
+    startTour();
+    syncUI();
+    var t0 = performance.now();
+    try {
+      while (tour.on && !film.cancel && !film.error) {
+        var dt = 1 / fps;
+        stepTour(dt); simulate(dt); render(dt, dt);
+        updateAudio();
+        film.cx.drawImage(canvas, 0, 0, w, h); drawCaption(film.cx, w, h);
+        var vf = new VideoFrame(film.cv, { timestamp: Math.round(film.frame * 1e6 / fps), duration: Math.round(1e6 / fps) });
+        film.enc.encode(vf, { keyFrame: film.frame % (fps * 2) === 0 }); vf.close();
+        film.frame++; film.time = film.frame / fps;
+        if (film.frame % 4 === 0) {
+          var done = film.frame / Math.max(film.total, 1), el = (performance.now() - t0) / 1000;
+          filmStatus('FILM ' + Math.round(done * 100) + '% · ' + Math.max(0, Math.round(el / Math.max(done, 1e-3) - el)) + ' s left · Esc to cancel');
+        }
+        while (film.enc.encodeQueueSize > 3) await wait(4);
+        await nextFrame();
+      }
+      await film.enc.flush();
+      if (film.error) throw film.error;
+      if (film.cancel) { $('note').textContent = 'Film render cancelled.'; return; }
+      if (ac) { filmStatus('Mixing sound…'); await nextFrame(); await encodeFilmAudio(ac[1], film.time); }
+      film.mux.finalize();
+      var blob = new Blob([film.mux.target.buffer], { type: 'video/mp4' }), mb = (blob.size / 1048576).toFixed(1);
+      rec.blob = blob; rec.type = 'video/mp4';
+      $('note').textContent = 'Film rendered: ' + mb + ' MB, ' + w + '×' + h + ' at ' + fps + ' fps' + (ac ? ' with sound' : '') + '. Saving…';
+      saveFile('ocean-water-lab-demo-' + h + 'p.mp4', blob, function (ok, code) {
+        $('note').textContent = ok ? 'Saved the ' + mb + ' MB film.' : 'The film was not saved (' + (code || 'cancelled') + '). Use Save last video to try again.';
+        $('rec-save').hidden = false;
+      });
+    } catch (e) {
+      $('note').textContent = 'Film render failed: ' + (e && e.message || e);
+    } finally {
+      film.on = false; perf.locked = false; filmStatus('');
+      if (tour.on) stopTour();
+      try { if (film.enc && film.enc.state !== 'closed') film.enc.close(); } catch (e2) { /* already closed */ }
+      if (liveSound) startAudio();
+      lastT = performance.now();
+      syncUI();
+    }
+  }
+  async function encodeFilmAudio(cfg, seconds) {
+    var sr = 48000, len = Math.ceil((seconds + 0.25) * sr);
+    var oc = new OfflineAudioContext(2, len, sr), n = buildAudioGraph(oc);
+    film.alog.forEach(function (e) { applyTargets(n, e.v, e.t); });
+    film.events.forEach(function (e) { if (e.t < seconds) playShot(n, Math.max(e.t, 0.001), e.a); });
+    var buf = await oc.startRendering();
+    var enc = new AudioEncoder({ output: function (chunk, meta) { film.mux.addAudioChunk(chunk, meta); }, error: function (e) { film.error = e; } });
+    enc.configure(cfg);
+    var L = buf.getChannelData(0), R = buf.getChannelData(1), block = 4800;
+    for (var i = 0; i < buf.length; i += block) {
+      var nf = Math.min(block, buf.length - i), data = new Float32Array(nf * 2);
+      data.set(L.subarray(i, i + nf), 0); data.set(R.subarray(i, i + nf), nf);
+      var ad = new AudioData({ format: 'f32-planar', sampleRate: sr, numberOfFrames: nf, numberOfChannels: 2, timestamp: Math.round(i / sr * 1e6), data: data });
+      enc.encode(ad); ad.close();
+    }
+    await enc.flush();
+    enc.close();
+    if (film.error) throw film.error;
+  }
+
+  // ===========================================================================
   //  interface
   // ===========================================================================
   var DOUGLAS = [[0.01, 'Calm, glassy'], [0.1, 'Calm, rippled'], [0.5, 'Smooth'], [1.25, 'Slight'], [2.5, 'Moderate'], [4, 'Rough'], [6, 'Very rough'], [9, 'High'], [14, 'Very high'], [1e9, 'Phenomenal']];
@@ -2432,6 +2558,8 @@
     $('tour-rec').textContent = rec.on && tour.on ? 'Stop recording' : 'Record tour';
     $('tour-rec').setAttribute('aria-pressed', rec.on && tour.on ? 'true' : 'false');
     $('rec-free').textContent = rec.on && !tour.on ? 'Stop recording' : 'Record';
+    $('film-render').textContent = film.on ? 'Cancel film' : 'Render film';
+    $('film-render').setAttribute('aria-pressed', film.on ? 'true' : 'false');
     $('rec-free').setAttribute('aria-pressed', rec.on && !tour.on ? 'true' : 'false');
     if (exportFmt && !$('tab-export').hidden) refreshExport();
   }
@@ -2635,6 +2763,7 @@
       setTimeout(function () { if (startRecording(1920, 1080)) startTour(function () { setTimeout(stopRecording, 300); }); syncUI(); }, 200);
     });
     $('rec-free').addEventListener('click', function () { if (rec.on) stopRecording(); else startRecording(1920, 1080); syncUI(); });
+    $('film-render').addEventListener('click', function () { renderFilm(1920, 1080, 30); });
     $('rec-save').addEventListener('click', function () {
       if (!rec.blob) return;
       saveFile('ocean-water-lab-' + Date.now() + (/mp4/.test(rec.type) ? '.mp4' : '.webm'), rec.blob, function (ok, code) {
@@ -2711,7 +2840,11 @@
     }, { passive: false });
     var DRIVE = { ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down', ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', Shift: 'boost' };
     window.addEventListener('keyup', function (e) { if (DRIVE[e.key]) boat.keys[DRIVE[e.key]] = false; });
-    window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && tour.on) { stopTour(); if (rec.on) stopRecording(); } });
+    window.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (film.on) { film.cancel = true; return; }
+      if (tour.on) { stopTour(); if (rec.on) stopRecording(); }
+    });
     window.addEventListener('blur', function () { boat.keys = {}; });
     window.addEventListener('keydown', function (e) {
       if (e.target && /INPUT|BUTTON|TEXTAREA/.test(e.target.tagName)) return;
@@ -2736,8 +2869,9 @@
   var lastT = 0, hudTimer = 0, driveTimer = 0;
 
   function tick(now) {
+    if (film.on) { lastT = now; requestAnimationFrame(tick); return; }     // the film render drives frames itself
     var gap = now - lastT;
-    var dtMs = Math.min(gap, 100); lastT = now;
+    var dtMs = clamp(gap, 0, 100); lastT = now;              // a frame's timestamp can precede start-up's last performance.now()
     if (gap > 500 && fft) fft.reset(simTime, 1 / 60, origin[0], origin[1]);
     var dt = dtMs / 1000;
     if (!reducedMotion && now - lastInput > 7000) cam.tYaw += dt * 0.022;      // slow drift when left alone
@@ -2810,7 +2944,7 @@
       window.OceanLab = {
         state: state, cam: cam, waves: waves, bodies: bodies, apply: applyAll, scene: applyScene, param: setParam, boat: boat,
         particles: function () { return part.n; }, flash: flash, bolt: bolt, rogue: rogue, spawnRogue: spawnRogue,
-        tour: tour, startTour: startTour, stepTour: stepTour, fire: fireCannons, ship: ship, sea: sea, sun: sun, exportText: function (f) { return OP.exporters[f](state, derived()); },
+        tour: tour, startTour: startTour, stepTour: stepTour, fire: fireCannons, ship: ship, film: film, renderFilm: renderFilm, TOUR: TOUR, sea: sea, sun: sun, exportText: function (f) { return OP.exporters[f](state, derived()); },
         set: function (k, v) { setValue(k, v); if (k === 'sea' || k === 'quality') { applySea(true); if (fft) { fft.reset(simTime, 1 / 60, origin[0], origin[1]); fft.calibrateFoam(); readSea(); seaSettled = true; } } },
         // n simulated steps; the last few are drawn (so temporal accumulation settles). readPixels makes the call wait for the GPU.
         frames: function (n, dt) {

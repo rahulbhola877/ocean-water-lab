@@ -22,7 +22,8 @@ for (const k in shaders) shaders[k] = shaders[k].split('\n').filter((l) => l.tri
 let html = read('src/index.template.html');
 html = html.replace('/*@KIT_JS@*/', () => read('../kit/js/water_waves.js') + '\n' + read('../kit/js/water_fft.js'));
 html = html.replace('/*@SHADERS@*/', () => JSON.stringify(shaders).replace(/</g, '\\u003c'));
-html = html.replace('/*@MAIN_JS@*/', () => read('src/params.js') + '\n' + read('src/main.js'));
+const vendor = '/*! mp4-muxer 5.2.2 (c) 2023 Vanilagy, MIT License, https://github.com/Vanilagy/mp4-muxer */\n' + read('src/vendor/mp4-muxer.min.js');
+html = html.replace('/*@MAIN_JS@*/', () => vendor + '\n' + read('src/params.js') + '\n' + read('src/main.js'));
 mkdirSync(join(here, 'dist'), { recursive: true });
 writeFileSync(join(here, 'dist/index.html'), html);
 console.log('built dist/index.html', (html.length / 1024).toFixed(1) + ' KiB', Object.keys(shaders).join(' '));
