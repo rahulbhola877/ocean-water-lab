@@ -27,7 +27,13 @@ int main() {
         double pts[12] = { 0, -0.2, 0,  1, 0.1, 0.5,  -2, 0.4, 3,  5, -1.0, -4 }, vel[12] = { 0.1, -0.5, 0,  0, 0, 0,  1, 2, -1,  0, 0.3, 0 }, f[12];
         water::BuoyancyConfig cfg; cfg.minWavelength = 1.3;
         double wet = w.buoyancy(pts, vel, 4, cfg, water::openOcean, f);
-        printf("\"buoyancy\":[%.17g", wet); for (int i = 0; i < 12; i++) printf(",%.17g", f[i]); printf("]}");
+        printf("\"buoyancy\":[%.17g", wet); for (int i = 0; i < 12; i++) printf(",%.17g", f[i]); printf("],");
+        // the storm terms: breaking crests and their roller, wind, a current, sideways drag
+        water::BuoyancyConfig st; st.pointVolume = 0.05; st.pointRadius = 0.18; st.pointArea = 0.13; st.minWavelength = 1.3;
+        st.breakSpeed = 6; st.breakAccel = 0.05; st.windX = 12; st.windZ = -5; st.currentX = 0.4; st.currentZ = 0.2; st.linearDragH = 0.2; st.airDrag = 1.1;
+        double ptsS[12] = { 0, 0.3, 0,  1, 0.9, 0.5,  -2, 0.1, 3,  5, -0.4, -4 };
+        wet = w.buoyancy(ptsS, vel, 4, st, water::openOcean, f);
+        printf("\"storm\":[%.17g,%.17g", w.breakingAccel(0.4 * water::whitecapCoverage(w.params.windSpeed), 2), wet); for (int i = 0; i < 12; i++) printf(",%.17g", f[i]); printf("]}");
     }
     printf("]\n");
     return 0;

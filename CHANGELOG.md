@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.0
+
+Physics: the gaps in storms, under water and at the shore, closed in both engines. Waves can now capsize boats.
+
+- **Full lab and kit (JS, C++, C#)**
+  - **Breaking crests.** Where the water at a crest accelerates downward faster than a threshold, the crest is breaking: its roller drives the water near the surface forward and slams into the topsides above it. `breakingAccel(share)` sets the threshold so the share of the sea breaking matches the whitecap cover for the wind (Monahan), and the FFT lab keeps it adapting to the water the bodies meet. New config: `breakSpeed`, `breakAccel`, `rollerHeight`.
+  - **Depth fade.** Wave motion fades with depth as exp(-2π d / L), so sunk objects and deep keels no longer feel the full surface motion (`decayWavelength`).
+  - **Wind** on the parts above water (`windX`, `windZ`, `airDrag`, `windArea`), following the visible gust fronts in the lab. With `linearDragH` lowered, flotsam drifts downwind at about 1.5 % of the wind speed.
+  - **Currents** (`currentX`, `currentZ`); in the lab, *Current* and *Current heading* under Physics.
+  - **Surf and rogue waves move the water,** not just its height: surf runs shoreward at η√(g/h) and breaks as a bore; a rogue wave has its own orbital motion, fading with its own wavelength.
+  - **Flooding, capsizing, righting** (lab): open hulls take green water over the deck edge and float lower; a boat past 90° for 1.5 s capsizes and stays over (a hull turned over traps air). Press **R** to right her, or the autopilot's crew does after 5 s.
+  - **Collisions** (lab): bodies collide as boxes with impulses at the contact point, so a knock can spin or tip them.
+  - **Ships:** roll and pitch damping only in the water, and lighter, so a ship heels and rolls in a storm; on autopilot she reefs in a blow. The speedboat's keel and planing lift only work the right way up.
+  - The C++ port matches the JavaScript to 7e-13 including the new terms; `tools/physics.mjs` checks the outcomes in the running lab.
+- **Water Lite 2.3**
+  - **3D rigid bodies:** crates, barrels, buoys and the sailing boat are point-sampled rigid bodies on the Gerstner water, with its velocity and acceleration, depth fade, breaking crests, wind, the seabed and box collisions. Floaters ride slack moorings. The boat sails her circle on an autopilot with engine, keel, rudder and a sail that heels her (she eases the sheet when she heels far).
+  - **Side view:** horizontal orbital flow fading with depth, plus the flow feeding the ripples; breaking crests (faces steeper than about 22°); wind on hulls and the boat's sail, which drags when it is under water (so a boat turned over stays turtled); flooding; the seabed under each hull corner with friction, so sunk things lie flat.
+  - **Top view:** the wind and current set the boat and floaters drifting, and ripples shove the boat.
+  - **API:** `capsize` and `righted` events, `rightBoat()`, options `autoRight`, `current`, `currentDir`.
+
 ## 1.4.0
 
 - **Water Lite 2.2:** the weak spots from 2.1, fixed.

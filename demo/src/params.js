@@ -105,6 +105,8 @@
     // ---- physics + boat -----------------------------------------------------------
     ['density', 'physics', 'Water density', 990, 1300, 1, 1025, 'kg'],
     ['drag', 'physics', 'Drag', 0.1, 4, 0.01, 1, 'x'],
+    ['current', 'physics', 'Current', 0, 3, 0.05, 0, 'ms'],
+    ['currentDir', 'physics', 'Current heading', 0, 360, 1, 120, 'deg'],
     ['throttle', 'physics', 'Boat throttle', 0, 1, 0.01, 0.75, 'pct'],
     ['spray', 'physics', 'Spray', 0, 3, 0.05, 1, 'x']
   ];
@@ -303,7 +305,7 @@
       'sea level       = ' + state.tide + ' m + ' + state.tideRange + ' m * sin(2 pi t / ' + state.tidePeriod + ' s)   // raise your water plane (or lower the land) by this',
       'foam sim decay  = exp(-dt / ' + state.foamLife + ');  wake decay = exp(-dt / ' + state.wakeLife + ');',
       'sun direction   = (' + v3(d.sunDir) + ');  sun colour = (' + v3(d.sunColor) + ');',
-      'buoyancy: waterDensity ' + state.density + ' kg/m3, drag x' + state.drag
+      'buoyancy: waterDensity ' + state.density + ' kg/m3, drag x' + state.drag + ', current ' + state.current + ' m/s towards ' + state.currentDir + ' deg (kit buoyancyWith: currentX/Z)'
     ].join('\n');
   }
   function exportUnity(state, d) {

@@ -341,27 +341,89 @@
      returns submerged fraction 0..1
      ------------------------------------------------------------------------ */
   var tmpSample = {};
-  WaveSet.prototype.buoyancy = function (points, velocities, count, cfg, depthAt, forces) {
-    var rho = cfg.waterDensity || 1025;
-    var wet = 0;
+  /* Forces on one body's sample points: Archimedes lift, the Froude-Krylov force (the wave's
+     own pressure field), drag against the moving water, and, when configured, more:
+       decayWavelength  wave motion fades with depth, exp(-2 pi d / L) (deep-water decay); 0 = off
+       breakSpeed       where a crest breaks, its roller runs forward at this speed, m/s, and
+                        carries the body with it; this is what rolls and capsizes boats in a storm
+       breakAccel       a crest breaks where the water accelerates downward faster than this, in g
+                        (default 0.35; a linear wave sum rarely gets there, so use breakingAccel()
+                        to match the share of the sea that is breaking, as the whitecaps show)
+       rollerHeight     how far the aerated roller of a breaking crest rides above the smooth
+                        surface, m; it slams into the topsides there (default 0)
+       currentX/Z       a steady current, m/s, the same at every depth (tidal stream, river)
+       windX, windZ     wind at the body, m/s; drags on the parts above water
+       airDrag          drag coefficient above water (default 1)
+       windArea         side area facing the wind, m^2 (default: from the hull volume)
+       linearDragH      linear drag sideways (default linearDrag); lower lets the wind set a
+                        floating object drifting at a few percent of the wind speed (leeway)
+     Shared by every water source: sampleFn(x, z, out) fills the water state at (x, z). */
+  function buoyancyWith(sampleFn, points, velocities, count, cfg, forces) {
+    var rho = cfg.waterDensity || 1025, r = cfg.pointRadius, wet = 0, s = tmpSample;
+    var L = cfg.decayWavelength || 0, brk = cfg.breakSpeed || 0, ba = cfg.breakAccel === undefined ? 0.35 : cfg.breakAccel;
+    var roll = cfg.rollerHeight || 0, cx = cfg.currentX || 0, cz = cfg.currentZ || 0;
+    var linH = cfg.linearDragH === undefined ? cfg.linearDrag : cfg.linearDragH;
+    var wx = cfg.windX || 0, wz = cfg.windZ || 0, windy = wx !== 0 || wz !== 0;
+    var aPt = windy ? (cfg.windArea > 0 ? cfg.windArea : Math.pow(count * cfg.pointVolume, 2 / 3)) / count : 0;
+    var air = 0.5 * 1.225 * (cfg.airDrag === undefined ? 1 : cfg.airDrag) * aPt;
     for (var i = 0, o = 0; i < count; i++, o += 3) {
-      var x = points[o], y = points[o + 1], z = points[o + 2];
-      var depth = depthAt ? depthAt(x, z) : 1e9;
-      var s = this.sample(x, z, cfg.minWavelength, depth, tmpSample);
-      var r = cfg.pointRadius;
+      var x = points[o], y = points[o + 1], z = points[o + 2], vx = velocities[o], vy = velocities[o + 1], vz = velocities[o + 2];
+      sampleFn(x, z, s);
       var f = (s.height - (y - r)) / (2 * r);
       f = f < 0 ? 0 : f > 1 ? 1 : f;
-      if (f <= 0) { forces[o] = forces[o + 1] = forces[o + 2] = 0; continue; }
+      var fx = 0, fy = 0, fz = 0, Bs = 0, jx = 0, jz = 0;
+      if (brk > 0) {                                     // is the crest above breaking? (Bs 0..1)
+        var a0 = -s.ay / G, sh = Math.sqrt(s.vx * s.vx + s.vz * s.vz);
+        if (a0 > ba && sh > 1e-3 && brk > sh) { Bs = Math.min((a0 - ba) / 0.05, 1); jx = s.vx / sh * brk + cx; jz = s.vz / sh * brk + cz; }
+      }
+      if (f < 1) {
+        if (windy) {                                     // the dry part of this cell catches the wind
+          var ux = wx - vx, uy = -vy, uz = wz - vz, us = Math.sqrt(ux * ux + uy * uy + uz * uz) * air * (1 - f);
+          fx = ux * us; fy = uy * us; fz = uz * us;
+        }
+        if (Bs > 0 && roll > 0) {                        // the roller (half water, half air) slams into the topsides
+          var fr = (s.height + roll * Bs - (y - r)) / (2 * r);
+          fr = (fr > 1 ? 1 : fr) - f;
+          if (fr > 0) { var qx = jx - vx, qz = jz - vz, qs = Math.sqrt(qx * qx + qz * qz) * 0.25 * rho * cfg.quadDrag * cfg.pointArea * fr; fx += qx * qs; fz += qz * qs; }
+        }
+      }
+      if (f <= 0) { forces[o] = fx; forces[o + 1] = fy; forces[o + 2] = fz; continue; }
       wet += f;
+      var d = s.height - y; d = d > 0 ? d : 0;           // how deep the cell's centre is
+      var fade = L > 0 ? Math.exp(-TAU * d / L) : 1;
+      var swx = s.vx * fade + cx, swy = s.vy * fade, swz = s.vz * fade + cz;
+      if (Bs > 0) {                                      // under the roller the water is driven forward too
+        var B = Bs * Math.exp(-d / (2 * r + 0.5));
+        swx += (jx - swx) * B; swz += (jz - swz) * B;
+      }
       var m = rho * cfg.pointVolume * f;                 // displaced mass at this sample
-      var rx = velocities[o] - s.vx, ry = velocities[o + 1] - s.vy, rz = velocities[o + 2] - s.vz;
-      var speed = Math.sqrt(rx * rx + ry * ry + rz * rz);
-      var drag = m * cfg.linearDrag + 0.5 * rho * cfg.quadDrag * cfg.pointArea * f * speed;
-      forces[o] = m * s.ax - drag * rx;
-      forces[o + 1] = m * (G + s.ay) - drag * ry;
-      forces[o + 2] = m * s.az - drag * rz;
+      var rx = vx - swx, ry = vy - swy, rz = vz - swz;
+      var dq = 0.5 * rho * cfg.quadDrag * cfg.pointArea * f * Math.sqrt(rx * rx + ry * ry + rz * rz);
+      var dragH = m * linH + dq;
+      forces[o] = fx + m * s.ax * fade - dragH * rx;
+      forces[o + 1] = fy + m * (G + s.ay * fade) - (m * cfg.linearDrag + dq) * ry;
+      forces[o + 2] = fz + m * s.az * fade - dragH * rz;
     }
-    return wet / count;
+    return count > 0 ? wet / count : 0;
+  }
+  /* The downward acceleration (in g) exceeded on the given share of the sea, for cfg.breakAccel.
+     share: the fraction of the surface breaking at any moment, for example
+     0.4 * whitecapCoverage(windSpeed) (the rest of the whitecap cover is foam left behind). */
+  WaveSet.prototype.breakingAccel = function (share, minWavelength) {
+    var rand = Rng(4242), s = {}, n = 2048, a = new Float64Array(n), span = Math.max(this.peakWavelength, 10) * 8, i;
+    for (i = 0; i < n; i++) { this.sample(rand() * span, rand() * span, minWavelength || 1, 1e9, s); a[i] = -s.ay / G; }
+    Array.prototype.sort.call(a, function (p, q) { return p - q; });
+    var q = 1 - Math.min(Math.max(share, 0.0005), 0.5);
+    return Math.max(a[Math.floor(q * (n - 1))], 0.05);
+  };
+  WaveSet.prototype.buoyancy = function (points, velocities, count, cfg, depthAt, forces) {
+    var self = this;
+    if ((cfg.decayWavelength === undefined && this.peakWavelength > 0) || (cfg.breakSpeed > 0 && cfg.rollerHeight === undefined)) {
+      cfg = Object.assign({}, cfg);
+      if (cfg.decayWavelength === undefined) cfg.decayWavelength = this.peakWavelength;
+      if (cfg.rollerHeight === undefined) cfg.rollerHeight = Math.min(0.12 * this.significantHeight + 0.3, 2.5);
+    }
+    return buoyancyWith(function (x, z, out) { self.sample(x, z, cfg.minWavelength, depthAt ? depthAt(x, z) : 1e9, out); }, points, velocities, count, cfg, forces);
   };
 
   return {
@@ -369,6 +431,7 @@
     SWELL_WAVES: SWELL_WAVES,
     DEFAULTS: DEFAULTS,
     WaveSet: WaveSet,
+    buoyancyWith: buoyancyWith,
     Rng: Rng,
     seaStateFromWind: seaStateFromWind,
     whitecapCoverage: whitecapCoverage,

@@ -68,6 +68,15 @@ struct BuoyancyConfig {
     double linearDrag = 1.1;           // 1/s
     double quadDrag = 1.0;             // drag coefficient
     double minWavelength = 1.0;        // ignore waves shorter than the hull, metres
+    double decayWavelength = -1;       // wave motion fades as exp(-2 pi d / L) with depth d; -1 = the sea's peak wavelength, 0 = off
+    double breakSpeed = 0;             // where a crest breaks, it carries the body with the wave at this speed, m/s (0 = off)
+    double breakAccel = 0.35;          // a crest breaks where the water accelerates downward faster than this, in g (see breakingAccel)
+    double windX = 0, windZ = 0;       // wind at the body, m/s: drags on the parts above water
+    double currentX = 0, currentZ = 0; // a steady current, m/s, the same at every depth (tidal stream, river)
+    double airDrag = 1.0;              // drag coefficient above water
+    double rollerHeight = -1;          // how far a breaking crest's roller rides above the smooth surface, m; -1 = from the sea's height, 0 = off
+    double linearDragH = -1;           // linear drag sideways; -1 = linearDrag (lower lets the wind set a floater drifting)
+    double windArea = 0;               // side area facing the wind, m^2; 0 = from the hull volume
 };
 
 // mulberry32 (public domain, T. Ettinger). Integer-exact in JS, C++ and C#.
@@ -344,11 +353,30 @@ public:
     // Returns the submerged fraction 0..1.
     template <class DepthFn>
     double buoyancy(const double* points, const double* velocities, int pointCount,
-                    const BuoyancyConfig& cfg, DepthFn depthAt, double* forces) const {
+                    const BuoyancyConfig& cfgIn, DepthFn depthAt, double* forces) const {
         const WaveSet* self = this;
+        BuoyancyConfig cfg = cfgIn;
+        if (cfg.decayWavelength < 0) cfg.decayWavelength = peakWavelength;
+        if (cfg.rollerHeight < 0) cfg.rollerHeight = cfg.breakSpeed > 0 ? std::min(0.12 * significantHeight + 0.3, 2.5) : 0;
         return buoyancyWith([self, &cfg, &depthAt](double x, double z, WaterSample& s) {
             self->sample(x, z, cfg.minWavelength, depthAt(x, z), s);
         }, points, velocities, pointCount, cfg, forces);
+    }
+
+    // The downward acceleration (in g) exceeded on the given share of the sea, for
+    // BuoyancyConfig::breakAccel. share: the fraction breaking at any moment, for example
+    // 0.4 * whitecapCoverage(windSpeed) (the rest of the whitecap cover is foam left behind).
+    double breakingAccel(double share, double minWavelength) const {
+        Rng rand(4242);
+        const int n = 2048;
+        std::vector<double> a(n);
+        double span = (peakWavelength > 10 ? peakWavelength : 10) * 8;
+        WaterSample s;
+        for (int i = 0; i < n; i++) { double x = rand() * span, z = rand() * span; sample(x, z, minWavelength > 0 ? minWavelength : 1, 1e9, s); a[i] = -s.ay / kGravity; }
+        std::sort(a.begin(), a.end());
+        double sh = share < 0.0005 ? 0.0005 : share > 0.5 ? 0.5 : share;
+        double v = a[(int)((1 - sh) * (n - 1))];
+        return v > 0.05 ? v : 0.05;
     }
 
 private:
@@ -369,21 +397,50 @@ double buoyancyWith(SampleFn sampleFn, const double* points, const double* veloc
                     const BuoyancyConfig& cfg, double* forces) {
     double wet = 0;
     WaterSample s;
+    const double r = cfg.pointRadius, L = cfg.decayWavelength, brk = cfg.breakSpeed, ba = cfg.breakAccel;
+    const double roll = cfg.rollerHeight > 0 ? cfg.rollerHeight : 0, linH = cfg.linearDragH >= 0 ? cfg.linearDragH : cfg.linearDrag;
+    const bool windy = cfg.windX != 0 || cfg.windZ != 0;
+    const double aPt = windy && pointCount > 0 ? (cfg.windArea > 0 ? cfg.windArea : std::pow(pointCount * cfg.pointVolume, 2.0 / 3.0)) / pointCount : 0;
+    const double air = 0.5 * 1.225 * cfg.airDrag * aPt, rho = cfg.waterDensity;
     for (int i = 0, o = 0; i < pointCount; i++, o += 3) {
         double x = points[o], y = points[o + 1], z = points[o + 2];
+        double vx = velocities[o], vy = velocities[o + 1], vz = velocities[o + 2];
         sampleFn(x, z, s);
-        double r = cfg.pointRadius;
         double f = (s.height - (y - r)) / (2 * r);
         f = f < 0 ? 0 : f > 1 ? 1 : f;
-        if (f <= 0) { forces[o] = forces[o + 1] = forces[o + 2] = 0; continue; }
+        double fx = 0, fy = 0, fz = 0, Bs = 0, jx = 0, jz = 0;
+        if (brk > 0) {                                                  // is the crest above breaking? (Bs 0..1)
+            double a0 = -s.ay / kGravity, sh = std::sqrt(s.vx * s.vx + s.vz * s.vz);
+            if (a0 > ba && sh > 1e-3 && brk > sh) { Bs = std::min((a0 - ba) / 0.05, 1.0); jx = s.vx / sh * brk + cfg.currentX; jz = s.vz / sh * brk + cfg.currentZ; }
+        }
+        if (f < 1) {
+            if (windy) {                                                // the dry part of this cell catches the wind
+                double ux = cfg.windX - vx, uy = -vy, uz = cfg.windZ - vz;
+                double us = std::sqrt(ux * ux + uy * uy + uz * uz) * air * (1 - f);
+                fx = ux * us; fy = uy * us; fz = uz * us;
+            }
+            if (Bs > 0 && roll > 0) {                                   // the roller (half water, half air) slams into the topsides
+                double fr = (s.height + roll * Bs - (y - r)) / (2 * r);
+                fr = (fr > 1 ? 1 : fr) - f;
+                if (fr > 0) { double qx = jx - vx, qz = jz - vz, qs = std::sqrt(qx * qx + qz * qz) * 0.25 * rho * cfg.quadDrag * cfg.pointArea * fr; fx += qx * qs; fz += qz * qs; }
+            }
+        }
+        if (f <= 0) { forces[o] = fx; forces[o + 1] = fy; forces[o + 2] = fz; continue; }
         wet += f;
-        double m = cfg.waterDensity * cfg.pointVolume * f;              // displaced mass at this sample
-        double rx = velocities[o] - s.vx, ry = velocities[o + 1] - s.vy, rz = velocities[o + 2] - s.vz;
-        double speed = std::sqrt(rx * rx + ry * ry + rz * rz);
-        double drag = m * cfg.linearDrag + 0.5 * cfg.waterDensity * cfg.quadDrag * cfg.pointArea * f * speed;
-        forces[o] = m * s.ax - drag * rx;
-        forces[o + 1] = m * (kGravity + s.ay) - drag * ry;
-        forces[o + 2] = m * s.az - drag * rz;
+        double d = s.height - y; d = d > 0 ? d : 0;                     // how deep the cell's centre is
+        double fade = L > 0 ? std::exp(-kTau * d / L) : 1;
+        double swx = s.vx * fade + cfg.currentX, swy = s.vy * fade, swz = s.vz * fade + cfg.currentZ;
+        if (Bs > 0) {                                                   // under the roller the water is driven forward too
+            double B = Bs * std::exp(-d / (2 * r + 0.5));
+            swx += (jx - swx) * B; swz += (jz - swz) * B;
+        }
+        double m = rho * cfg.pointVolume * f;                           // displaced mass at this sample
+        double rx = vx - swx, ry = vy - swy, rz = vz - swz;
+        double dq = 0.5 * rho * cfg.quadDrag * cfg.pointArea * f * std::sqrt(rx * rx + ry * ry + rz * rz);
+        double dragH = m * linH + dq;
+        forces[o] = fx + m * s.ax * fade - dragH * rx;
+        forces[o + 1] = fy + m * (kGravity + s.ay * fade) - (m * cfg.linearDrag + dq) * ry;
+        forces[o + 2] = fz + m * s.az * fade - dragH * rz;
     }
     return pointCount > 0 ? wet / pointCount : 0.0;
 }

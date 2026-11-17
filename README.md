@@ -17,7 +17,7 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 
 - **Game looks:** one click for Tropical Bay, Golden Coast, Pirate Seas, Big Surf, Hurricane, Pirate Storm, Deep Ocean, Moonlit or Glass Calm.
 - **Take the helm:** pick Speedboat or Pirate ship, then press *Take the helm*.
-  - Speedboat: W/S throttle, A/D steer, Shift boost.
+  - Speedboat: W/S throttle, A/D steer, Shift boost. R rights her after a capsize.
   - Ship: W/S set more or less sail, A/D rudder, Space fires a broadside, Q/E fire port or starboard.
 - **Play tour:** a cinematic run through every look.
   - *Render film* draws the tour frame by frame and encodes a smooth 1080p MP4 with sound (WebCodecs), however slow your GPU is.
@@ -55,9 +55,13 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - Rogue waves, and bioluminescence at night.
 
 **Physics**
-- Buoyancy from GPU read-back of the actual rendered surface: Archimedes lift, Froude-Krylov force, drag.
-- Objects ride the surf and rogue waves too.
-- A planing speedboat, and a square-rigger that sails by the apparent wind and fires cannons.
+- Buoyancy from GPU read-back of the actual rendered surface: Archimedes lift, Froude-Krylov force, drag. Wave motion fades with depth.
+- Breaking crests: where a crest breaks, its roller throws whatever floats there forward and slams into the topsides. The share of the sea breaking follows the whitecap cover for the wind, so a breeze rarely bothers a boat and a hurricane knocks her flat.
+- Surf and rogue waves move the water as well as lifting it: surf runs shoreward as a bore, and a rogue crest can roll a boat over.
+- Wind (with the visible gust fronts) on everything above the water, so flotsam drifts downwind; an optional steady current.
+- Open hulls flood when green water comes over the deck edge. A boat lying past 90° capsizes and stays over until you press R (or the autopilot's crew rights her).
+- Bodies collide as boxes, with spin.
+- A planing speedboat, and a square-rigger that sails by the apparent wind (and reefs in a blow) and fires cannons.
 
 **Sound**
 - Procedural ocean, wash, wind, rain, thunder, engine, cannons and splashes. Turn it on with *Sound*.
@@ -70,7 +74,7 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - **Three views:** a 3D island lagoon, a 2D side view and a 2D top-down view.
 - **Six art styles:** realistic, toon, pixel art, low poly, retro and ink.
 - **Pixel art in whole pixels,** with retro palettes and clean ordered dithering.
-- **The same physics in every style:** things float, boats leave wakes, ripples bounce off coasts, and waves wash up beaches.
+- **The same physics in every style:** things float, boats leave wakes, ripples bounce off coasts, and waves wash up beaches. In 3D, crates, buoys and a sailing boat are rigid bodies; breaking crests, wind, currents and flooding can knock the boat flat or turn her over, with `capsize` and `righted` events.
 - **Day, sunset, night and storm,** with rain, lightning, stars and glowing foam at night, in every view and style.
 - **Ready for real games:** scrolling 2D cameras and bigger maps, splash and lightning events for sound, an `auto` quality that follows the device, a one-call device benchmark, and recovery from a lost GPU context.
 

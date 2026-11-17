@@ -275,6 +275,43 @@ const results = await page.evaluate(async () => {
     'peaks ' + I2._terrainHeight(0, -60).toFixed(1) + ' m and ' + I2._terrainHeight(120, -10).toFixed(1) + ' m, water between ' + I2._terrainHeight(60, -35).toFixed(1) + ' m');
   I2.dispose();
 
+  // physics: real bodies in 3D, breaking crests, capsizing and righting, the sea bed, leeway, currents
+  const P3 = mk({ mode: '3d', mood: 'day', wind: 7, waveHeight: 1 }), pev = [];
+  P3.on('capsize', () => pev.push('capsize')); P3.on('righted', () => pev.push('righted'));
+  for (let i = 0; i < 1800; i++) P3.update(1 / 30);
+  const pb = P3.boat, isl0 = P3.islands[0], ring = Math.hypot(pb.x - isl0.x, pb.z - isl0.z);
+  const pUp = 1 - 2 * (pb.q[0] * pb.q[0] + pb.q[2] * pb.q[2]);
+  ok('3D boat is a rigid body that sails her circle upright', Math.abs(ring - pb.radius) < 15 && pUp > 0.85 && pb.wet > 0.05, 'ring ' + ring.toFixed(0) + ' m of ' + pb.radius.toFixed(0) + ', upright ' + pUp.toFixed(2));
+  ok('3D floaters float on their moorings', P3.floaters.every((f) => f.wet > 0.3 && f.wet < 0.7 && Math.hypot(f.x - f.hx, f.z - f.hz) < 7), P3.floaters.map((f) => f.wet.toFixed(2)).join(' '));
+  ok('breaking threshold is calibrated to the whitecaps', P3._brk.accel > 0.05 && P3._brk.accel < 0.5 && P3._brk.speed >= 0, 'breaks above ' + P3._brk.accel.toFixed(2) + ' g, roller ' + P3._brk.speed.toFixed(1) + ' m/s');
+  P3.setOptions({ autoRight: false }); pb.q = [1, 0, 0, 0]; pb.w = [0, 0, 0];
+  for (let i = 0; i < 150; i++) P3.update(1 / 30);
+  const turned = pb.capsized;
+  P3.rightBoat(); for (let i = 0; i < 90; i++) P3.update(1 / 30);
+  const up2 = 1 - 2 * (pb.q[0] * pb.q[0] + pb.q[2] * pb.q[2]);
+  ok('3D capsize is detected, and rightBoat() rights her', turned && !pb.capsized && up2 > 0.8 && pev.join() === 'capsize,righted', pev.join(' then ') + ', upright ' + up2.toFixed(2));
+  const wx = P3.addFloater(pb.x + 30, pb.z, { kind: 'crate' }); wx.hx = wx.x = isl0.x + 120; wx.hz = wx.z = isl0.z;
+  P3.setOptions({ current: 1, currentDir: 90 });
+  for (let i = 0; i < 60; i++) P3.update(1 / 30);
+  const zc = wx.z; for (let i = 0; i < 60; i++) P3.update(1 / 30);
+  ok('a current carries 3D floaters (until the mooring holds them)', (wx.z - zc) / 2 > 0.4 || Math.hypot(wx.x - wx.hx, wx.z - wx.hz) > 3.5, 'drift ' + ((wx.z - zc) / 2).toFixed(2) + ' m/s');
+  P3.dispose();
+  const S2 = mk({ mode: 'side', mood: 'day', wind: 2, waveHeight: 0.5 }), sev = [];
+  S2.on('capsize', () => sev.push('capsize')); S2.on('righted', () => sev.push('righted'));
+  const sunk = S2.addFloater(200, S2.side.level, { kind: 'crate', size: 22, density: 3, angle: 0.6 });
+  const sb = S2.floaters.find((f) => f.kind === 'boat'); sb.a = Math.PI;
+  for (let i = 0; i < 600; i++) S2.update(1 / 30);
+  const sa = Math.abs(Math.atan2(Math.sin(4 * sunk.a), Math.cos(4 * sunk.a))) / 4;
+  ok('a sunk crate lies flat on the sea bed', sa < 0.12 && sunk.sub > 0.95, 'tilt from flat ' + (sa * 57.3).toFixed(0) + ' degrees');
+  ok('side boat turned over capsizes, then autoRight rights her', sev.join() === 'capsize,righted' && Math.cos(sb.a) > 0.9, sev.join(' then ') + ', angle ' + (Math.atan2(Math.sin(sb.a), Math.cos(sb.a)) * 57.3).toFixed(0));
+  S2.dispose();
+  const S3 = mk({ mode: 'side', mood: 'day', wind: 7, windDir: 0, waveHeight: 0.6, floaters: false });
+  const lw = S3.addFloater(120, S3.side.level, { kind: 'crate', size: 22 });
+  for (let i = 0; i < 150; i++) S3.update(1 / 30);
+  const lx = lw.x; for (let i = 0; i < 300; i++) S3.update(1 / 30);
+  ok('the wind sets a floating crate drifting downwind (leeway)', (lw.x - lx) / 10 > 0.5, ((lw.x - lx) / 10).toFixed(1) + ' px/s at 7 m/s');
+  S3.dispose();
+
   // benchmark
   const B2 = mk({ mode: 'top' }, 160, 90);
   const bm = B2.benchmark(2);

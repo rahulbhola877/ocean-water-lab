@@ -20,11 +20,12 @@ The simulation is identical in every art style; only the drawing changes. A pixe
   - Beaches, palms and rocks.
   - Shallow water you can see the sand through, then a reef edge dropping to deep blue.
   - Gerstner waves from a wind spectrum, calmed inside the reef. The CPU reads the same heights, so objects float on the waves you see.
+  - Crates, barrels, buoys and the sailing boat are rigid bodies. They pitch, roll and drift on slack moorings, and a storm can knock the boat flat or turn her over.
   - Reflections of the sky and of the islands.
 - **`side`: a 2D side view for platformers.**
   - The surface is a row of springs on top of a swell.
   - Through it you see a reef, seaweed swaying, fish that dart away from splashes, a cliff and dock posts reaching the seabed, and light shafts.
-  - Crates, barrels, ducks and boats float, tip, right themselves and splash when they drop in.
+  - Crates, barrels, ducks and boats float, tip, right themselves and splash when they drop in. Something that sinks settles flat on the seabed.
   - Near the surface the water also mirrors the world above it.
 - **`top`: a 2D top-down view for RPGs and strategy games.**
   - The seabed shows through the shallows.
@@ -101,7 +102,17 @@ On a phone the settings fold into a sheet at the bottom, so the water stays in v
 - **Things floating.** `water.addFloater(x, y, { kind, size, density })` adds a body that the engine simulates and draws.
   - Side view: `crate`, `barrel`, `duck`, `boat`. They push each other apart, and nothing balances on a floating crate for long.
   - Top view: `crate`, `barrel`. They bump into each other, and the boat shoves them out of its way.
-  - 3D: `crate`, `barrel`, `buoy`.
+  - 3D: `crate`, `barrel`, `buoy`. Each is a rigid body on a slack mooring (4 m of rope to where you put it).
+- **The physics.** The same model in the 3D and side views, worked out at sample points across each body:
+  - Archimedes lift, and the push of the waves' own pressure field, so things ride the orbital motion.
+  - Drag against the moving water. Wave motion fades with depth, so something deep down hardly feels the waves.
+  - **Breaking crests.** Where a crest breaks, its roller runs forward and slams into whatever floats there. In 3D a crest breaks where the water accelerates downward too fast, with the threshold set so that the share of the sea breaking matches the whitecap cover for the wind. In the side view a crest breaks where its face is steeper than about 22°. This is what knocks a boat down in a storm.
+  - **Wind** on the parts above the water, and on the boat's sail. Floating things drift downwind at a few percent of the wind speed (leeway). The 3D boat eases her sheet when she heels far.
+  - **Currents:** `current` (m/s) flowing towards `currentDir` carries everything along, in every view.
+  - **Water aboard.** Green water over the boat's deck edge floods her, and she floats lower until it drains. Buoyancy tanks keep her afloat.
+  - **Capsizing.** A boat lying past 90° for a second and a half has capsized: you get a `'capsize'` event. A boat turned over floats upside down (in the side view with her sail hanging under). With `autoRight` (on by default) she is righted after 5 s; `water.rightBoat()` rights her at once, and `'righted'` fires either way. A boat that comes back up by herself also fires `'righted'`.
+  - **The seabed and beaches** hold things up at the corners of their hulls, with friction.
+  - **Collisions.** 3D bodies collide as boxes, with spin; in the side view they push apart as boxes.
 - **Your own 3D islands.** `islands: [{ x, z, r, hill }, ...]` in metres replaces the layout made from `seed`.
   - The terrain grows to fit them.
   - The boat circles the first island.
@@ -112,6 +123,7 @@ On a phone the settings fold into a sheet at the bottom, so the water stays in v
 - **Sound and effects.** `water.on(type, fn)` and `water.off(type, fn)`:
   - `'splash'` gives `{ mode, x, y, power, radius }` (`z` instead of `y` in 3D) for drops, things falling in, and your own `splash()` calls. The boat's wake and rain are quiet, so you only hear real splashes.
   - `'lightning'` gives `{ strength, x }`, with `x` from 0 to 1 across the view for panning the thunder.
+  - `'capsize'` and `'righted'` give `{ mode, x, z }` in 3D and `{ mode, x, y }` in the side view.
   - `'contextlost'` and `'contextrestored'`: see below.
 
 The demo's **Sound** button makes surf, rain, splashes and thunder with WebAudio from these events.
@@ -192,6 +204,8 @@ Pass options to the constructor, or change them later with `water.setOptions({..
 | `islands` | `null` | 3D: your own layout, `[{ x, z, r, hill }, ...]` in metres; null makes one from `seed` |
 | `seed` | `7` | changes waves, islands and the top-view map |
 | `floaters`, `boat` | `true` | the built-in floating objects and boat |
+| `autoRight` | `true` | a capsized boat is righted after 5 s; false leaves her over until you call `rightBoat()` |
+| `current`, `currentDir` | `0`, `0` | a steady current in m/s, flowing towards `currentDir` degrees (side view: towards the right when the direction is under 90°) |
 
 Colours you can override:
 
@@ -207,7 +221,9 @@ Colours you can override:
 
 Constructor only: `transparent` (default false) gives the canvas an alpha channel; `preserveDrawingBuffer` (default false) lets you read pixels back after a frame.
 
-Other methods: `resize()`, `config()` (current options as JSON), `clearFloaters()`, `drop(x, y)` (the demo's click), `lightning(strength, x)`, `benchmark(frames)`, `on(type, fn)`, `off(type, fn)`, `dispose()`.
+Other methods: `resize()`, `config()` (current options as JSON), `clearFloaters()`, `drop(x, y)` (the demo's click), `lightning(strength, x)`, `rightBoat(boat)` (rights the 3D boat, or the side view's boat or the one you pass), `benchmark(frames)`, `on(type, fn)`, `off(type, fn)`, `dispose()`.
+
+In 3D, `water.boat` and each floater are rigid bodies: `x`, `y`, `z` (centre of mass), `vel`, `q` (orientation quaternion `[x, y, z, w]`), `w` (spin), plus `heading`, `wet` (how much is under water), `flood` and `capsized` on the boat.
 
 ## How it stays cheap
 
@@ -230,21 +246,23 @@ Other methods: `resize()`, `config()` (current options as JSON), `clearFloaters(
 
 If a device struggles, try `quality: 'potato'` or a pixel style: both cut the pixels drawn by four or more.
 
-About 166 KB of source, 117 KB minified, 41 KB gzipped. Most of that is shader text.
+About 194 KB of source, 132 KB minified, 46 KB gzipped. Most of that is shader text.
 
 ## Honest limits
 
 - **3D**
   - The sea is a sum of Gerstner waves, not an FFT ocean. For that, use the main lab in this repository.
   - Islands are round with noisy coasts; there are no other shapes yet.
-  - Floating objects use a spring float, not full rigid-body physics.
+  - Bodies are clouds of sample points (27 for a crate, 58 for the boat), so a body's shape is approximate, and boxes collide only with boxes.
+  - The boat sails on an autopilot round the first island; you cannot steer her in 3D yet.
+  - Waves near a breaking crest stay smooth Gerstner shapes: the roller's push is modelled, but the crest does not curl over.
   - Far away, the line where beach meets sea can shimmer a little.
 - **Side view**
   - The surface is a height field, so waves cannot curl over.
   - Bodies push each other apart as boxes that ignore their tilt, so a tipped crate can overlap a neighbour a little.
   - The scenery (cliff, dock, reef) is fixed. Turn `scenery` off to draw your own.
 - **Top view**
-  - Ripples are a wave equation, not shallow-water flow, so there are no currents.
+  - Ripples are a wave equation, not shallow-water flow. They shove things about, but carry no current; use `current` for one.
   - Maps bigger than nine times the standard area get a coarser grid. Zoomed far in, coasts stay organic but ripples get soft.
   - On a tall phone screen, the map is cropped to a narrow strip at zoom 1; follow the boat or your player.
 - **All views**

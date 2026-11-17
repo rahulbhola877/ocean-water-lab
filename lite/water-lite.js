@@ -75,7 +75,9 @@
     zoom: 1,                                              // top view: 1 shows the whole map, 2 half as wide, ...
     worldWidth: 480,                                      // side view: world width; wider than 480 scrolls with camera2d.x
     islands: null,                                        // 3D: your own layout, [{ x, z, r, hill }, ...]; null = made from seed
-    seed: 7, floaters: true, boat: true
+    seed: 7, floaters: true, boat: true,
+    autoRight: true,                                      // a capsized boat is put back on her feet after 5 s ('capsize' and 'righted' events)
+    current: 0, currentDir: 0                             // a steady current, m/s, flowing towards currentDir degrees (side view: + is to the right)
   };
   // 2D bodies: height / width, the part that floats (heights from the centre, y down), centre of mass, density
   var KIND2D = {
@@ -1111,7 +1113,7 @@
     this.setOptions(opts);
   }
   WaterLite.PALETTES = PALETTES; WaterLite.STYLES = STYLES; WaterLite.QUALITY = QUALITY; WaterLite.THEMES = THEMES; WaterLite.DEFAULTS = DEFAULTS;
-  WaterLite.version = '2.2.0';
+  WaterLite.version = '2.3.0';
   WaterLite._genTextures = genTextures;   // exposed for tools and tests
 
   WaterLite.prototype._prog = function (vs, fsBody, name, raw) {
@@ -1289,7 +1291,7 @@
   WaterLite.prototype._buildWaves = function () {
     var o = this.opts, n = this.q.waves, R = rng(o.seed * 7919 + 13), U = Math.max(this._windSpeed(), 0.5);
     var wp = 0.877 * G / U, A = new Float32Array(64), B = new Float32Array(64), alpha = 0.0081;
-    var wmin = wp * 0.75, wmax = wp * 4.5, sumA = 0, i;
+    var wmin = wp * 0.75, wmax = wp * 4.5, sumA = 0, sumA2 = 0, i, TAU = 2 * Math.PI;
     this.waves = [];
     for (i = 0; i < n; i++) {
       var f = (i + 0.5) / n, w = wmin * Math.pow(wmax / wmin, f), dw = w * Math.log(wmax / wmin) / n;
@@ -1297,7 +1299,7 @@
       var amp = Math.sqrt(2 * S * dw) * o.waveHeight, kk = w * w / G;
       var dir = (o.windDir + (R() - 0.5) * 70 * (0.4 + f)) * Math.PI / 180;
       this.waves.push({ dx: Math.cos(dir), dz: Math.sin(dir), k: kk, a: amp, w: w, ph: R() * 6.2832 });
-      sumA += amp;
+      sumA += amp; sumA2 += amp * amp;
     }
     var chop = clamp(o.choppiness, 0, 1);
     for (i = 0; i < n; i++) {
@@ -1306,6 +1308,35 @@
       A.set([wv.dx, wv.dz, wv.k, wv.a], i * 4); B.set([wv.w, wv.ph, wv.q, 0], i * 4);
     }
     this.waveA = A; this.waveB = B; this.amp = sumA;
+    // Breaking crests: where the water at a crest accelerates downward faster than brk.accel
+    // (in g) the crest breaks, and its roller runs forward at brk.speed. The threshold is set
+    // so the share of the sea breaking matches the whitecap cover for this wind (Monahan).
+    var cov = Math.min(3.84e-6 * Math.pow(U, 3.41), 1), share = clamp(0.4 * cov, 0.0005, 0.5), acc = [], tmp = {}, Rc = rng(4242), span = 8 * TAU * G / (wp * wp);
+    this._lp = TAU * G / (wp * wp);                                    // peak wavelength: wave motion fades with depth over it
+    for (i = 0; i < 1024; i++) { this._water3d(Rc() * span, Rc() * span, Rc() * 60, tmp, true); acc.push(-tmp.ay / G); }
+    acc.sort(function (p, q) { return p - q; });
+    this._brk = { accel: Math.max(acc[Math.floor((1 - share) * 1023)], 0.05), speed: Math.min(0.55 * G / wp, 8) * smooth(0.0005, 0.005, cov) };
+    this._roller = Math.min(0.12 * 4 * Math.sqrt(sumA2 / 2) + 0.3, 2);     // 0.12 Hs above the smooth surface
+  };
+  // The water over (x, z) with its motion, for floating bodies: height, and the velocity and
+  // acceleration of the Gerstner particle that is at (x, z) at time t. open: ignore the reefs.
+  WaterLite.prototype._water3d = function (x, z, t, out, open) {
+    var W = this.waves, px = x, pz = z, i, wv, th, att = open ? 1 : this._waveAtten(x, z);
+    for (var it = 0; it < 2; it++) {
+      var ox = 0, oz = 0;
+      for (i = 0; i < W.length; i++) { wv = W[i]; th = wv.k * (wv.dx * px + wv.dz * pz) - wv.w * t + wv.ph; var c = Math.cos(th) * wv.q * wv.a * att; ox += wv.dx * c; oz += wv.dz * c; }
+      px = x - ox; pz = z - oz;
+    }
+    var h = 0, vx = 0, vy = 0, vz = 0, ax = 0, ay = 0, az = 0;
+    for (i = 0; i < W.length; i++) {
+      wv = W[i]; th = wv.k * (wv.dx * px + wv.dz * pz) - wv.w * t + wv.ph;
+      var sn = Math.sin(th), cs = Math.cos(th), A = wv.a * att, w = wv.w, qa = wv.q * A;
+      h += A * sn;
+      vx += wv.dx * qa * w * sn; vz += wv.dz * qa * w * sn; vy -= A * w * cs;
+      ax -= wv.dx * qa * w * w * cs; az -= wv.dz * qa * w * w * cs; ay -= A * w * w * sn;
+    }
+    out.height = h; out.vx = vx; out.vy = vy; out.vz = vz; out.ax = ax; out.ay = ay; out.az = az;
+    return out;
   };
 
   // Surface at a point. 3D: { height, normal } at world x, z. Side: height at x (view units, up positive).
@@ -1439,7 +1470,16 @@
         self.addFloater(fx, fz, { kind: sp[2] });
       });
     }
-    this.boat3d = this.opts.boat ? { ang: 0.6, radius: isl[0].r * 2.25, speed: 4.2, x: 0, z: 0, y: 0, heading: 0, tilt: [0, 0] } : null;
+    this.boat3d = null;
+    if (this.opts.boat) {
+      var b3 = this.boat3d = boatBody3d(), a0 = 0.6, R0 = isl[0].r * 2.25;
+      b3.radius = R0; b3.speed = 4.2;
+      b3.x = isl[0].x + Math.cos(a0) * R0; b3.z = isl[0].z + Math.sin(a0) * R0; b3.y = 0;
+      b3.q = qAxis(0, 1, 0, -(a0 + Math.PI / 2));
+      b3.heading = a0 + Math.PI / 2;
+    }
+    this._acc3d = 0;
+    for (var settle = 0; settle < 120; settle++) this._physics3d(1 / 90, this.time);   // let everything find its waterline
   };
   WaterLite.prototype._uploadTerrain = function () {
     var gl = this.gl, D = this.terrainData;
@@ -1452,28 +1492,14 @@
     this.props = { buf: pb, count: D.props.length / 10 };
   };
   WaterLite.prototype._update3d = function (dt) {
-    var self = this;
-    this.floaters.forEach(function (f) {
-      var s = self.sample(f.x, f.z), target = s.height - f.size[1] * 0.5 * (f.density * 2 - 1);
-      f.vy += ((target - f.y) * 30 - f.vy * 4.5 - (f.y > s.height + 0.2 ? 9.81 : 0)) * dt;
-      f.y += f.vy * dt;
-      f.tilt[0] += (s.normal[2] * 1.2 - f.tilt[0]) * Math.min(dt * 4, 1);
-      f.tilt[1] += (-s.normal[0] * 1.2 - f.tilt[1]) * Math.min(dt * 4, 1);
-      f.vx = (f.vx || 0) + (s.normal[0] * 0.8 + (f.hx - f.x) * 0.05) * dt; f.vz = (f.vz || 0) + (s.normal[2] * 0.8 + (f.hz - f.z) * 0.05) * dt;
-      f.vx *= 1 - dt * 0.5; f.vz *= 1 - dt * 0.5;
-      f.x += f.vx * dt; f.z += f.vz * dt; f.yaw += (f.vx - f.vz) * dt * 0.1;
-    });
     var b = this.boat3d;
+    this._acc3d = Math.min(this._acc3d + dt, 0.1);
+    var h = 1 / 90, t0 = this.time - this._acc3d;
+    while (this._acc3d >= h) { this._acc3d -= h; t0 += h; this._physics3d(h, t0); }
     if (b) {
-      var c = this.islands[0];
-      b.ang += b.speed / b.radius * dt;
-      b.x = c.x + Math.cos(b.ang) * b.radius; b.z = c.z + Math.sin(b.ang) * b.radius;
-      b.heading = b.ang + Math.PI / 2;
-      var s = this.sample(b.x, b.z);
-      b.y += (s.height - b.y) * Math.min(dt * 5, 1);
-      b.tilt[0] += (s.normal[2] - b.tilt[0]) * Math.min(dt * 3, 1); b.tilt[1] += (-s.normal[0] - b.tilt[1]) * Math.min(dt * 3, 1);
+      this._hull3d(b, dt);
       this._trailT = (this._trailT || 0) + dt;
-      if (this._trailT > 0.35) {
+      if (this._trailT > 0.35 && b.wet > 0.05 && !b.capsized) {
         this._trailT = 0;
         this.trail.unshift({ x: b.x - Math.cos(b.heading) * 1.8, z: b.z - Math.sin(b.heading) * 1.8, life: 1 });
         if (this.trail.length > 8) this.trail.pop();
@@ -1483,6 +1509,278 @@
     var cam = this.cam;
     if (cam.auto) { cam.autoT = (cam.autoT || 0) + dt; cam.yaw = 1.32 + 0.38 * Math.sin(cam.autoT * 0.07); }
   };
+  // one physics step for every body in the 3D view
+  WaterLite.prototype._physics3d = function (h, t) {
+    var F = this.floaters, b = this.boat3d, i, j;
+    if (b) { if (b.righting > 0) this._righting3d(b, h); else this._boatForces3d(b, h, t); this._stepBody3d(b, h, t); }
+    for (i = 0; i < F.length; i++) {
+      var f = F[i], dx = f.hx - f.x, dz = f.hz - f.z, d = Math.sqrt(dx * dx + dz * dz);
+      if (d > 4) { var k = f.mass * 0.8 * (d - 4) / d * h; f.vel[0] += dx * k / f.mass; f.vel[2] += dz * k / f.mass; }   // the slack mooring pulls tight
+      this._stepBody3d(f, h, t);
+    }
+    var all = b ? F.concat([b]) : F;
+    for (i = 0; i < all.length; i++) for (j = i + 1; j < all.length; j++) collide3d(all[i], all[j]);
+    for (i = F.length - 1; i >= 0; i--) if (!isFinite(F[i].y) || F[i].y < -60) F.splice(i, 1);
+  };
+  // the wind a couple of metres above the sea, with slow gusts (stronger in a storm)
+  WaterLite.prototype._wind3d = function (x, z, t, out) {
+    var wd = this.opts.windDir * Math.PI / 180, g = this.env && this.env.wind > 1.2 ? 0.35 : 0.15;
+    var U = this._windSpeed() * 0.8 * (1 + g * (0.6 * Math.sin(t * 0.31 + x * 0.013) + 0.4 * Math.sin(t * 0.53 - z * 0.011 + 1.7)));
+    out[0] = Math.cos(wd) * U; out[1] = Math.sin(wd) * U;
+    return out;
+  };
+  var bS = {}, bW = [0, 0], bT = [0, 0, 0], bR3 = [0, 0, 0];
+  // Per sample point: Archimedes lift and the waves' pressure field (Froude-Krylov), drag against
+  // the moving water, all fading with depth; the roller of a breaking crest; wind on what is dry;
+  // lift lost to water aboard (only upright: a hull turned over traps air); the sea bed.
+  WaterLite.prototype._stepBody3d = function (b, h, t) {
+    var n = b.n, i, o, r = b.r, near = 2 * r + 0.5, brk = this._brk, roller = this._roller, L = this._lp, hd = b.hd || 1;
+    var upY = 1 - 2 * (b.q[0] * b.q[0] + b.q[2] * b.q[2]), lift = 1 - (b.floodLoss || 0.6) * b.flood * smooth(-0.2, 0.3, upY);
+    var cd = this.opts.currentDir * Math.PI / 180, cux = Math.cos(cd) * this.opts.current, cuz = Math.sin(cd) * this.opts.current;
+    var air = 0.5 * 1.225 * Math.pow(n * b.V, 2 / 3) / n, wind = this._wind3d(b.x, b.z, t, bW), s = bS;
+    var nearLand = this._terrainHeight(b.x, b.z) > -(b.reach + 1), kG = b.mass * 260 / n, cG = b.mass * 14 / n;
+    var fx = 0, fy = -b.mass * G, fz = 0, tx = 0, ty = 0, tz = 0, wet = 0, topWet = 0, hit = 0;
+    for (i = 0, o = 0; i < n; i++, o += 3) {
+      bT[0] = b.pts[o]; bT[1] = b.pts[o + 1]; bT[2] = b.pts[o + 2];
+      qRot(b.q, bT, bR3);
+      var rx0 = bR3[0], ry0 = bR3[1], rz0 = bR3[2], px = b.x + rx0, py = b.y + ry0, pz = b.z + rz0;
+      var vx = b.vel[0] + b.w[1] * rz0 - b.w[2] * ry0, vy = b.vel[1] + b.w[2] * rx0 - b.w[0] * rz0, vz = b.vel[2] + b.w[0] * ry0 - b.w[1] * rx0;
+      this._water3d(px, pz, t, s);
+      var f = clamp((s.height - (py - r)) / (2 * r), 0, 1), Fx = 0, Fy = 0, Fz = 0;
+      var a0 = -s.ay / G, Bs = 0, jx = 0, jz = 0;
+      if (brk.speed > 0 && a0 > brk.accel) {
+        var sh = Math.sqrt(s.vx * s.vx + s.vz * s.vz);
+        if (sh > 1e-3 && brk.speed > sh) { Bs = Math.min((a0 - brk.accel) / 0.05, 1); jx = s.vx / sh * brk.speed + cux; jz = s.vz / sh * brk.speed + cuz; }
+      }
+      if (f < 1) {
+        var ux = wind[0] - vx, uy = -vy, uz = wind[1] - vz, us = Math.sqrt(ux * ux + uy * uy + uz * uz) * air * (1 - f);
+        Fx = ux * us; Fy = uy * us; Fz = uz * us;                       // the dry part catches the wind
+        if (Bs > 0) {                                                   // the roller (half water, half air) slams into the topsides
+          var fr = clamp((s.height + roller * Bs - (py - r)) / (2 * r), 0, 1) - f;
+          if (fr > 0) { var qx = jx - vx, qz = jz - vz, qs = Math.sqrt(qx * qx + qz * qz) * 0.25 * RHO * b.area * fr; Fx += qx * qs; Fz += qz * qs; if (Bs > hit) hit = Bs; }
+        }
+      }
+      if (f > 0) {
+        wet += f;
+        if (b.top[i] && f > 0.8) topWet++;
+        var d = Math.max(s.height - py, 0), fade = Math.exp(-6.2832 * d / L), m = RHO * b.V * f;
+        var rx = vx - s.vx * fade - cux, ry = vy - s.vy * fade, rz = vz - s.vz * fade - cuz;
+        var dq = 0.5 * RHO * b.area * f * Math.sqrt(rx * rx + ry * ry + rz * rz);
+        var hx = -(m * 0.15 + dq) * rx * hd, hz = -(m * 0.15 + dq) * rz * hd;
+        if (Bs > 0) {                                                   // under the roller the water is driven forward too
+          var B = Bs * Math.exp(-d / near), kx = jx - vx, kz = jz - vz, jd = m * 0.15 + 0.5 * RHO * b.area * f * Math.sqrt(kx * kx + ry * ry + kz * kz);
+          hx += (jd * kx - hx) * B; hz += (jd * kz - hz) * B;
+          if (B > hit) hit = B;
+        }
+        Fx += m * s.ax * fade * lift + hx;
+        Fy += m * (G + s.ay * fade) * lift - (m * 1.1 + dq) * ry;
+        Fz += m * s.az * fade * lift + hz;
+      }
+      if (nearLand) {                                                   // resting on the sea bed or the beach
+        var pen = this._terrainHeight(px, pz) - (py - r);
+        if (pen > 0) { Fy += kG * Math.min(pen, 0.6) - cG * vy; Fx -= cG * 0.8 * vx; Fz -= cG * 0.8 * vz; }
+      }
+      fx += Fx; fy += Fy; fz += Fz;
+      tx += ry0 * Fz - rz0 * Fy; ty += rz0 * Fx - rx0 * Fz; tz += rx0 * Fy - ry0 * Fx;
+    }
+    b.wet = wet / n; b.topWet = b.nTop ? topWet / b.nTop : 0; b.brkHit = Math.max(b.brkHit || 0, hit);
+    b.vel[0] += fx / b.mass * h; b.vel[1] += fy / b.mass * h; b.vel[2] += fz / b.mass * h;
+    var wb = qRot(qConj(b.q), b.w, [0, 0, 0]), tb = qRot(qConj(b.q), [tx, ty, tz], [0, 0, 0]), I = b.I;
+    wb[0] += (tb[0] - (I[2] - I[1]) * wb[1] * wb[2]) / I[0] * h;
+    wb[1] += (tb[1] - (I[0] - I[2]) * wb[2] * wb[0]) / I[1] * h;
+    wb[2] += (tb[2] - (I[1] - I[0]) * wb[0] * wb[1]) / I[2] * h;
+    qRot(b.q, wb, b.w);
+    integrate3d(b, h);
+  };
+  // the boat's own forces: engine, keel and rudder on an autopilot that circles the first
+  // island, and the sail, whose sideways push heels her (she eases the sheet when she heels far)
+  WaterLite.prototype._boatForces3d = function (b, h, t) {
+    var M = b.mass, fw = qRot(b.q, [1, 0, 0], [0, 0, 0]), up = qRot(b.q, [0, 1, 0], [0, 0, 0]), sd = qRot(b.q, [0, 0, 1], [0, 0, 0]);
+    var upright = smooth(0.1, 0.6, up[1]), inW = clamp(b.wet * 3, 0, 1) * upright, v = b.vel;
+    var vf = v[0] * fw[0] + v[1] * fw[1] + v[2] * fw[2], vs = v[0] * sd[0] + v[1] * sd[1] + v[2] * sd[2];
+    var c = this.islands[0], R = b.radius, phi = Math.atan2(b.z - c.z, b.x - c.x) + 0.35;
+    var tgx = c.x + R * Math.cos(phi), tgz = c.z + R * Math.sin(phi), heading = Math.atan2(fw[2], fw[0]);
+    var err = Math.atan2(tgz - b.z, tgx - b.x) - heading;
+    while (err > Math.PI) err -= 2 * Math.PI; while (err < -Math.PI) err += 2 * Math.PI;
+    pushBody3d(b, scale3(fw, clamp((b.speed - vf) * 1.2, -0.5, 1.5) * M * inW), relPoint(b, -1.3, -0.25, 0), h);   // engine
+    pushBody3d(b, scale3(sd, -vs * M * 2.5 * inW), relPoint(b, 0.2, -0.35, 0), h);                                  // keel
+    var wy = b.w[0] * up[0] + b.w[1] * up[1] + b.w[2] * up[2], want = -(clamp(err * 1.2, -0.6, 0.6) + vf / R), k = (want - wy) * (1 - Math.exp(-2.5 * h)) * inW;   // turning about -y raises the heading
+    b.w[0] += up[0] * k; b.w[1] += up[1] * k; b.w[2] += up[2] * k;                                                 // rudder
+    var wind = this._wind3d(b.x, b.z, t, bW), ax = wind[0] - v[0], az = wind[1] - v[2];
+    var sl = Math.sqrt(sd[0] * sd[0] + sd[2] * sd[2]) || 1, across = (ax * sd[0] + az * sd[2]) / sl;
+    var tiltDeg = Math.acos(clamp(up[1], -1, 1)) * 57.3, sheet = clamp(1 - (tiltDeg - 18) / 25, 0.15, 1);
+    b.sheet = sheet;
+    var Fs = 0.5 * 1.225 * 5.5 * Math.sqrt(ax * ax + az * az) * across * sheet * Math.max(up[1], 0);
+    pushBody3d(b, [sd[0] / sl * Fs, 0, sd[2] / sl * Fs], relPoint(b, -0.1, 2.0, 0), h);                             // sail
+  };
+  // water aboard, capsizing and righting
+  WaterLite.prototype._hull3d = function (b, dt) {
+    var up = qRot(b.q, [0, 1, 0], [0, 0, 0]), fw = qRot(b.q, [1, 0, 0], [0, 0, 0]);
+    b.heading = Math.atan2(fw[2], fw[0]); b.tilt = [Math.asin(clamp(-qRot(b.q, [0, 0, 1], [0, 0, 0])[1], -1, 1)), Math.asin(clamp(fw[1], -1, 1))];
+    b.flood = clamp(b.flood + (0.3 * b.topWet * (1 - b.flood) - (up[1] > 0.5 && b.topWet < 0.05 ? 0.06 : 0)) * dt, 0, 1);
+    if (b.brkHit > 0.4 && this.time - (b.lastBurst || 0) > 0.7) { b.lastBurst = this.time; this.splash(b.x, b.z, 0.8 * b.brkHit, 1.6, true); }
+    b.brkHit = 0;
+    if (b.righting > 0) return;
+    if (up[1] < 0 && b.wet > 0.02) b.capT += dt; else if (up[1] > 0.3) b.capT = 0;
+    if (b.capsized && up[1] > 0.5) { b.capsized = false; this._emit('righted', { mode: '3d', x: b.x, z: b.z }); }   // her keel brought her back up
+    if (!b.capsized && b.capT > 1.5) { b.capsized = true; b.capsizedAt = this.time; this._emit('capsize', { mode: '3d', x: b.x, z: b.z }); }
+    if (b.capsized && this.opts.autoRight && this.time - b.capsizedAt > 5) this.rightBoat();
+  };
+  // put a capsized (or knocked-down) boat back on her feet, keeping her heading
+  WaterLite.prototype.rightBoat = function (which) {
+    if (this.opts.mode === 'side') {                                 // the side view's boat (or the one you pass)
+      var f = which || this.floaters.filter(function (o) { return o.kind === 'boat'; })[0];
+      if (!f || f.righting > 0) return false;
+      f.rightFrom = f.a; f.rightTo = Math.round(f.a / (2 * Math.PI)) * 2 * Math.PI; f.righting = 1e-6;
+      return true;
+    }
+    var b = this.boat3d;
+    if (!b || b.righting > 0) return false;
+    var fw = qRot(b.q, [1, 0, 0], [0, 0, 0]), hdg = Math.sqrt(fw[0] * fw[0] + fw[2] * fw[2]) > 0.2 ? Math.atan2(fw[2], fw[0]) : b.heading;
+    b.rightFrom = b.q.slice(); b.rightTo = qAxis(0, 1, 0, -hdg); b.righting = 1e-6;
+    return true;
+  };
+  WaterLite.prototype._righting3d = function (b, h) {
+    b.righting += h;
+    qSlerp(b.rightFrom, b.rightTo, smooth(0, 1.6, b.righting), b.q);
+    b.w[0] = b.w[1] = b.w[2] = 0; b.vel[1] *= Math.exp(-h * 3);
+    b.flood = Math.max(0, b.flood - h * 0.7);
+    if (b.righting >= 1.6) { b.righting = 0; b.capT = 0; if (b.capsized) { b.capsized = false; this._emit('righted', { mode: '3d', x: b.x, z: b.z }); } }
+  };
+
+  // ---- rigid-body helpers (3D) ---------------------------------------------------------------
+  var RHO = 1025;
+  function qRot(q, v, o) {
+    var x = q[0], y = q[1], z = q[2], w = q[3], tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+    o[0] = v[0] + w * tx + (y * tz - z * ty); o[1] = v[1] + w * ty + (z * tx - x * tz); o[2] = v[2] + w * tz + (x * ty - y * tx);
+    return o;
+  }
+  function qConj(q) { return [-q[0], -q[1], -q[2], q[3]]; }
+  function qAxis(ax, ay, az, ang) { var l = Math.sqrt(ax * ax + ay * ay + az * az) || 1, sn = Math.sin(ang / 2) / l; return [ax * sn, ay * sn, az * sn, Math.cos(ang / 2)]; }
+  function qSlerp(a, b, t, o) {
+    var d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3], sg = d < 0 ? -1 : 1, k0 = 1 - t, k1 = t, i;
+    d = Math.abs(d);
+    if (d < 0.9995) { var th = Math.acos(d), st = Math.sin(th); k0 = Math.sin((1 - t) * th) / st; k1 = Math.sin(t * th) / st; }
+    for (i = 0; i < 4; i++) o[i] = a[i] * k0 + b[i] * k1 * sg;
+    var l = 1 / Math.sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2] + o[3] * o[3]);
+    for (i = 0; i < 4; i++) o[i] *= l;
+    return o;
+  }
+  function scale3(v, k) { return [v[0] * k, v[1] * k, v[2] * k]; }
+  function relPoint(b, x, y, z) { return qRot(b.q, [x - b.com[0], y - b.com[1], z - b.com[2]], [0, 0, 0]); }
+  function invInertia3d(b, v) { var l = qRot(qConj(b.q), v, [0, 0, 0]); l[0] /= b.I[0]; l[1] /= b.I[1]; l[2] /= b.I[2]; return qRot(b.q, l, l); }
+  function pushBody3d(b, F, r, h) {                     // force F (world) at offset r (world) for h seconds
+    b.vel[0] += F[0] / b.mass * h; b.vel[1] += F[1] / b.mass * h; b.vel[2] += F[2] / b.mass * h;
+    var dw = invInertia3d(b, [r[1] * F[2] - r[2] * F[1], r[2] * F[0] - r[0] * F[2], r[0] * F[1] - r[1] * F[0]]);
+    b.w[0] += dw[0] * h; b.w[1] += dw[1] * h; b.w[2] += dw[2] * h;
+  }
+  function integrate3d(b, h) {
+    var air = Math.exp(-0.05 * h);
+    b.w[0] *= air; b.w[1] *= air; b.w[2] *= air;
+    b.x += b.vel[0] * h; b.y += b.vel[1] * h; b.z += b.vel[2] * h;
+    var q = b.q, wx = b.w[0], wy = b.w[1], wz = b.w[2], hh = 0.5 * h;
+    var qx = q[0] + hh * (wx * q[3] + wy * q[2] - wz * q[1]), qy = q[1] + hh * (wy * q[3] + wz * q[0] - wx * q[2]);
+    var qz = q[2] + hh * (wz * q[3] + wx * q[1] - wy * q[0]), qw = q[3] - hh * (wx * q[0] + wy * q[1] + wz * q[2]);
+    var l = 1 / Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+    q[0] = qx * l; q[1] = qy * l; q[2] = qz * l; q[3] = qw * l;
+  }
+  // A body: sample points on a grid inside its box (size, res), kept where mask(x, y, z) allows;
+  // density as a fraction of sea water; com, the centre of mass, in the box's own metres.
+  function makeBody3d(kind, size, res, density, com, mask) {
+    var pts = [], cols = {}, cell = [size[0] / res[0], size[1] / res[1], size[2] / res[2]], ix, iy, iz, off = mask ? mask.centre : [0, 0, 0];
+    for (ix = 0; ix < res[0]; ix++) for (iy = 0; iy < res[1]; iy++) for (iz = 0; iz < res[2]; iz++) {
+      var x = ((ix + 0.5) / res[0] - 0.5) * size[0] + off[0], y = ((iy + 0.5) / res[1] - 0.5) * size[1] + off[1], z = ((iz + 0.5) / res[2] - 0.5) * size[2] + off[2];
+      if (mask && !mask(x, y, z)) continue;
+      pts.push(x - com[0], y - com[1], z - com[2]);
+      var key = ix * 64 + iz;
+      if (!cols[key] || iy > cols[key][0]) cols[key] = [iy, pts.length / 3 - 1];
+    }
+    var n = pts.length / 3, V = cell[0] * cell[1] * cell[2], mass = density * RHO * V * n, mp = mass / n, I = [0, 0, 0], top = new Uint8Array(n), nTop = 0, reach = 0;
+    for (var i = 0; i < n; i++) {
+      var px = pts[i * 3], py = pts[i * 3 + 1], pz = pts[i * 3 + 2];
+      I[0] += mp * (py * py + pz * pz + (cell[1] * cell[1] + cell[2] * cell[2]) / 12);
+      I[1] += mp * (px * px + pz * pz + (cell[0] * cell[0] + cell[2] * cell[2]) / 12);
+      I[2] += mp * (px * px + py * py + (cell[0] * cell[0] + cell[1] * cell[1]) / 12);
+      reach = Math.max(reach, Math.sqrt(px * px + py * py + pz * pz));
+    }
+    for (var k in cols) { top[cols[k][1]] = 1; nTop++; }
+    return { kind: kind, size: size, box: mask ? mask.box : size, boxCentre: off, com: com, n: n, pts: new Float32Array(pts), top: top, nTop: nTop,
+      mass: mass, I: I, V: V, r: 0.5 * Math.min(cell[0], cell[1], cell[2]), area: Math.pow(V, 2 / 3), reach: reach,
+      x: 0, y: 0, z: 0, vel: [0, 0, 0], q: [0, 0, 0, 1], w: [0, 0, 0], wet: 0, topWet: 0, flood: 0, capT: 0, capsized: false, righting: 0, brkHit: 0 };
+  }
+  // the 3D sailing boat: a V hull 3.8 m long and 1.8 m wide, ballast low in the keel
+  function boatBody3d() {
+    var halfBeam = function (x) { return x > 0.3 ? 0.9 * (2.2 - x) / 1.9 : 0.8 + 0.1 * (x + 1.6) / 1.9; };
+    var keel = function (x) { return x > 1.0 ? -0.45 + (x - 1.0) / 1.2 * 0.95 : -0.35 - 0.1 * (x + 1.5) / 2.5; };
+    var mask = function (x, y, z) {
+      var k = keel(x);
+      if (x < -1.6 || x > 2.2 || y < k - 0.05 || y > 0.5) return false;
+      return Math.abs(z) < halfBeam(x) * clamp((y - k) / Math.max(0.5 - k, 0.05) * 1.3 + 0.2, 0.25, 1);
+    };
+    mask.centre = [0.3, 0.025, 0]; mask.box = [3.8, 0.95, 1.8];
+    var b = makeBody3d('boat', [3.8, 0.95, 1.8], [8, 3, 3], 0.42, [0.1, -0.15, 0], mask);
+    b.hd = 0.03;                                         // the hull slips along its length: the keel does the gripping
+    b.floodLoss = 0.45;                                  // buoyancy tanks: swamped, she still floats
+    b.scale = [1, 1, 1];
+    return b;
+  }
+  // model matrix of a body's mesh: its box scaled by scale, turned by q, centre of mass at x, y, z
+  function modelQ(b, sc) {
+    var x = b.q[0], y = b.q[1], z = b.q[2], w = b.q[3], o = new Float32Array(16);
+    var r = [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)];
+    for (var c = 0; c < 3; c++) { o[c * 4] = r[c * 3] * sc[c]; o[c * 4 + 1] = r[c * 3 + 1] * sc[c]; o[c * 4 + 2] = r[c * 3 + 2] * sc[c]; }
+    var cm = qRot(b.q, b.com, [0, 0, 0]);
+    o[12] = b.x - cm[0]; o[13] = b.y - cm[1]; o[14] = b.z - cm[2]; o[15] = 1;
+    return o;
+  }
+  // Two bodies collide as boxes: each one's sample points are tested against the other's box, and
+  // the contact pushes them apart with an impulse at the touching point, so a knock can spin a body.
+  var cL = [0, 0, 0], cT = [0, 0, 0];
+  function boxContact3d(a, b, out) {
+    var bx = b.box, bc = b.boxCentre, com = b.com, pr = a.r, ex = bx[0] / 2 + pr, ey = bx[1] / 2 + pr, ez = bx[2] / 2 + pr, conj = qConj(b.q);
+    var best = 0, ws = 0, nx = 0, ny = 0, nz = 0, px = 0, py = 0, pz = 0;
+    for (var i = 0, o = 0; i < a.n; i++, o += 3) {
+      cT[0] = a.pts[o]; cT[1] = a.pts[o + 1]; cT[2] = a.pts[o + 2];
+      qRot(a.q, cT, cL);
+      var wx = a.x + cL[0], wy = a.y + cL[1], wz = a.z + cL[2];
+      cT[0] = wx - b.x; cT[1] = wy - b.y; cT[2] = wz - b.z;
+      qRot(conj, cT, cL);
+      var lx = cL[0] + com[0] - bc[0], ly = cL[1] + com[1] - bc[1], lz = cL[2] + com[2] - bc[2];
+      var dx = ex - Math.abs(lx), dy = ey - Math.abs(ly), dz = ez - Math.abs(lz), d;
+      if (dx <= 0 || dy <= 0 || dz <= 0) continue;
+      if (dx < dy && dx < dz) { d = dx; nx += lx < 0 ? -d : d; } else if (dy < dz) { d = dy; ny += ly < 0 ? -d : d; } else { d = dz; nz += lz < 0 ? -d : d; }
+      px += wx * d; py += wy * d; pz += wz * d; ws += d; if (d > best) best = d;
+    }
+    if (ws <= 0) return 0;
+    var nw = qRot(b.q, [nx, ny, nz], [0, 0, 0]), l = Math.sqrt(nw[0] * nw[0] + nw[1] * nw[1] + nw[2] * nw[2]);
+    if (l < 1e-9) return 0;
+    out.n = [nw[0] / l, nw[1] / l, nw[2] / l]; out.p = [px / ws, py / ws, pz / ws];
+    return best;
+  }
+  function contact3d(a, b, n, p, depth) {               // n points from b towards a
+    var ima = 1 / a.mass, imb = 1 / b.mass, ra = [p[0] - a.x, p[1] - a.y, p[2] - a.z], rb = [p[0] - b.x, p[1] - b.y, p[2] - b.z];
+    var push = Math.min(depth, 0.5) * 0.5 / (ima + imb);
+    a.x += n[0] * push * ima; a.y += n[1] * push * ima; a.z += n[2] * push * ima;
+    b.x -= n[0] * push * imb; b.y -= n[1] * push * imb; b.z -= n[2] * push * imb;
+    var va = [a.vel[0] + a.w[1] * ra[2] - a.w[2] * ra[1], a.vel[1] + a.w[2] * ra[0] - a.w[0] * ra[2], a.vel[2] + a.w[0] * ra[1] - a.w[1] * ra[0]];
+    var vb = [b.vel[0] + b.w[1] * rb[2] - b.w[2] * rb[1], b.vel[1] + b.w[2] * rb[0] - b.w[0] * rb[2], b.vel[2] + b.w[0] * rb[1] - b.w[1] * rb[0]];
+    var rv = [va[0] - vb[0], va[1] - vb[1], va[2] - vb[2]], vn = rv[0] * n[0] + rv[1] * n[1] + rv[2] * n[2];
+    if (vn >= 0) return;
+    var eff = function (r, body) { var c = [r[1] * n[2] - r[2] * n[1], r[2] * n[0] - r[0] * n[2], r[0] * n[1] - r[1] * n[0]], k = invInertia3d(body, c); return (k[1] * r[2] - k[2] * r[1]) * n[0] + (k[2] * r[0] - k[0] * r[2]) * n[1] + (k[0] * r[1] - k[1] * r[0]) * n[2]; };
+    var j = -1.25 * vn / (ima + imb + eff(ra, a) + eff(rb, b));
+    var tx = rv[0] - vn * n[0], ty = rv[1] - vn * n[1], tz = rv[2] - vn * n[2], ts = Math.sqrt(tx * tx + ty * ty + tz * tz);
+    var jt = ts > 1e-4 ? Math.min(0.35 * j, ts / (ima + imb) * 0.5) / ts : 0, J = [n[0] * j - tx * jt, n[1] * j - ty * jt, n[2] * j - tz * jt];
+    pushBody3d(a, J, ra, 1); pushBody3d(b, [-J[0], -J[1], -J[2]], rb, 1);
+  }
+  var cOut = {};
+  function collide3d(a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, R = a.reach + b.reach + 0.5;
+    if (dx * dx + dy * dy + dz * dz >= R * R) return;
+    var d = boxContact3d(a, b, cOut);
+    if (d > 0) contact3d(a, b, cOut.n, cOut.p, d);
+    d = boxContact3d(b, a, cOut);
+    if (d > 0) contact3d(b, a, cOut.n, cOut.p, d);
+  }
   function lookAt(eye, at) {
     var f = [at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]], fl = Math.sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]); f = [f[0] / fl, f[1] / fl, f[2] / fl];
     var r = [-f[2], 0, f[0]], rl = Math.sqrt(r[0] * r[0] + r[2] * r[2]) || 1; r = [r[0] / rl, 0, r[2] / rl];
@@ -1492,12 +1790,6 @@
   }
   function mul(a, b) { var o = new Float32Array(16); for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++) o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3]; return o; }
   function persp(fov, asp, n, f) { var t = 1 / Math.tan(fov / 2); return [t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0]; }
-  function model(x, y, z, yaw, tx, tz, sx, sy, sz) {
-    var cy = Math.cos(yaw), sy2 = Math.sin(yaw), cx = Math.cos(tx), sxx = Math.sin(tx), cz = Math.cos(tz), szz = Math.sin(tz);
-    var Ry = [cy, 0, -sy2, 0, 0, 1, 0, 0, sy2, 0, cy, 0, 0, 0, 0, 1], Rx = [1, 0, 0, 0, 0, cx, sxx, 0, 0, -sxx, cx, 0, 0, 0, 0, 1], Rz = [cz, szz, 0, 0, -szz, cz, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-    var o = mul(mul(Ry, mul(Rx, Rz)), [sx, 0, 0, 0, 0, sy, 0, 0, 0, 0, sz, 0, 0, 0, 0, 1]);
-    o[12] = x; o[13] = y; o[14] = z; return o;
-  }
   var IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], MIRROR = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   WaterLite.prototype._eye = function () {
     var c = this.cam, cp = Math.cos(c.pitch);
@@ -1534,8 +1826,8 @@
       gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
     }
     if (scen) draw(this.props, IDENTITY);
-    this.floaters.forEach(function (f) { draw(self.meshes[f.kind] || self.meshes.crate, model(f.x, f.y, f.z, f.yaw, f.tilt[0], f.tilt[1], f.size[0], f.size[1], f.size[2])); });
-    if (this.boat3d) { var b = this.boat3d; draw(this.meshes.boat, model(b.x, b.y - 0.15, b.z, -b.heading, b.tilt[0], b.tilt[1], 1, 1, 1)); }
+    this.floaters.forEach(function (f) { draw(self.meshes[f.kind] || self.meshes.crate, modelQ(f, f.size)); });
+    if (this.boat3d) draw(this.meshes.boat, modelQ(this.boat3d, [1, 1, 1]));
     if (pn >= 0) gl.disableVertexAttribArray(pn);
     if (pc >= 0) gl.disableVertexAttribArray(pc);
   };
@@ -1677,8 +1969,10 @@
       f = { kind: def.kind || 'crate', x: x, y: y, vx: 0, vy: 0, a: def.angle || 0, size: def.size || 3, bob: 0 };
     } else {
       var kind = this.meshes[def.kind] ? def.kind : 'crate';
-      f = { kind: kind, x: x, z: y, hx: x, hz: y, y: def.y || 0, vy: 0, yaw: def.angle || Math.random() * 6, tilt: [0, 0], density: def.density || 0.5,
-        size: def.size ? [def.size, def.size, def.size] : kind === 'buoy' ? [0.8, 1.6, 0.8] : kind === 'barrel' ? [0.7, 1.0, 0.7] : [1.1, 1.1, 1.1] };
+      var size = def.size ? [def.size, def.size, def.size] : kind === 'buoy' ? [0.8, 1.6, 0.8] : kind === 'barrel' ? [0.7, 1.0, 0.7] : [1.1, 1.1, 1.1];
+      f = makeBody3d(kind, size, kind === 'buoy' ? [2, 4, 2] : [3, 3, 3], def.density || 0.5, kind === 'buoy' ? [0, -size[1] * 0.22, 0] : [0, 0, 0]);
+      f.x = x; f.z = y; f.hx = x; f.hz = y; f.y = def.y || 0; f.density = def.density || 0.5;
+      f.q = qAxis(0, 1, 0, def.angle === undefined ? Math.random() * 6 : def.angle);
     }
     this.floaters.push(f);
     if (this.floaters.length > 40) this.floaters.shift();
@@ -1700,8 +1994,18 @@
       }
     }
     for (i = 0; i < n; i++) h[i] = clamp(h[i], -S.range * 0.85, S.range * 0.85);
+    // the water under the ripples flows sideways to feed them (continuity: du/dx = -(dh/dt) / depth)
+    var U = S.u || (S.u = new Float32Array(n)), dxc = S.worldW / (n - 1), D = Math.max(S.viewH - 12 - S.level, 20), acc = 0;
+    for (i = 0; i < n; i++) { acc -= v[i] * dxc / D; U[i] = acc; }
+    for (i = 0; i < n; i++) U[i] = clamp(U[i] - acc * i / (n - 1), -220, 220);   // walls at both ends: no flow through them
     var sub = this.q.sub + 1, sd = dt / sub;
     for (s = 0; s < sub; s++) { for (i = 0; i < this.floaters.length; i++) this._float2d(this.floaters[i], sd); this._collide2d(); }
+    for (i = 0; i < this.floaters.length; i++) {
+      var fb = this.floaters[i];
+      if (fb.kind === 'boat') this._hull2d(fb, dt);
+      if (fb.brkHit > 0.4 && this.time - (fb.lastBurst || 0) > 0.6) { fb.lastBurst = this.time; this.splash(fb.x, S.level - this._sideHeight(fb.x), 4 * fb.brkHit, fb.w * 0.7, true); }
+      fb.brkHit = 0;
+    }
     this._stepDrops(dt, 600);
     // fish cruise back and forth between the cliff and the dock, and dart away from splashes
     this.fish.forEach(function (f) {
@@ -1722,29 +2026,87 @@
     var gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, this.tex.heights);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, 1, gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, B);
   };
-  // A rigid body in 2D: buoyancy and drag summed over sample points across the part that floats.
+  // The water in the side view at (x, y) (y down), y below the surface by d: horizontal flow
+  // (the swell's orbital motion, fading with depth, the flow feeding the ripples, a current),
+  // and whether the crest above is breaking (a face steeper than about 22 degrees) with the
+  // speed its roller runs at. All in view units per second.
+  var W2 = {};
+  WaterLite.prototype._water2d = function (x, d) {
+    var t = this.time, o = this.opts, a = Math.min(this._windSpeed() / 10, 2.2) * o.waveHeight;
+    var e1 = 3.2 * a * Math.sin(x * 0.021 - t * 1.25), e2 = 1.6 * a * Math.sin(x * 0.047 + t * 1.9 + 1.3), e3 = 0.8 * a * Math.sin(x * 0.11 - t * 3.1 + 0.4);
+    var u = 1.25 * e1 * Math.exp(-0.021 * d) - 1.9 * e2 * Math.exp(-0.047 * d) + 3.1 * e3 * Math.exp(-0.11 * d);
+    u += (this.side.u ? this._sideCol(this.side.u, x) : 0) + Math.cos(o.currentDir * Math.PI / 180) * o.current / SIDE.unit;
+    var hL = this._sideHeight(x - 3), hR = this._sideHeight(x + 3), slope = (hR - hL) / 6, rate = this._sideRate(x);
+    var c = Math.abs(slope) > 0.05 ? clamp(-rate / slope, -320, 320) : 0;       // which way, and how fast, the face is moving
+    W2.u = u; W2.B = c * slope < 0 ? clamp((Math.abs(slope) - 0.4) / 0.25, 0, 1) : 0;   // only the face a wave runs into breaks
+    W2.jet = 0.7 * c;
+    W2.roller = 4 + 4 * a;
+    return W2;
+  };
+  WaterLite.prototype._wind2d = function () {                       // m/s along +x, a couple of metres up, with slow gusts
+    var g = this.env && this.env.wind > 1.2 ? 0.35 : 0.15, t = this.time;
+    return Math.cos(this.opts.windDir * Math.PI / 180) * this._windSpeed() * 0.8 * (1 + g * (0.6 * Math.sin(t * 0.31) + 0.4 * Math.sin(t * 0.53 + 1.7)));
+  };
+  // A rigid body in 2D, summed over sample points across the part that floats: Archimedes lift,
+  // drag against the moving water, the roller of a breaking crest, wind on what is dry (and on a
+  // boat's sail, which also drags when it is under water), lift lost to water aboard an open boat,
+  // and the sea bed under the hull's corners, with friction.
+  var SAIL2D = [[0.12, 0.05], [0.1, -0.2], [0.06, -0.45]];        // a boat's sail: points (x / w, y / h from the centre, y down)
   WaterLite.prototype._float2d = function (f, dt) {
-    var S = this.side, K = KIND2D[f.kind], g = 600, w = f.w, H = f.h;
+    var S = this.side, K = KIND2D[f.kind], g = 600, w = f.w, H = f.h, boat = f.kind === 'boat';
+    if (f.righting > 0) { this._righting2d(f, dt); return; }
     var hy0 = K.hull[0] * H, hy1 = K.hull[1] * H, hh = hy1 - hy0, comY = K.com * H;
     var m = f.density * w * hh, I = m * (w * w + hh * hh) / 12;
-    var c = Math.cos(f.a), s = Math.sin(f.a), Fx = 0, Fy = m * g, T = 0, subSum = 0;
+    var c = Math.cos(f.a), s = Math.sin(f.a), Fx = 0, Fy = m * g, T = 0, subSum = 0, topWet = 0, hit = 0;
     var NX = 5, NY = 3, dA = w * hh / (NX * NY), cellH = hh / NY;
+    var Kw = 0.5 * 1.225 * g / (RHO * G * SIDE.unit), wind = this._wind2d(), lift = 1 - 0.45 * (f.flood || 0) * smooth(-0.2, 0.3, c);
+    var addForce = function (rx, ry, fx, fy) { Fx += fx; Fy += fy; T += rx * fy - ry * fx; };
     for (var i = 0; i < NX; i++) for (var j = 0; j < NY; j++) {
       var lx = ((i + 0.5) / NX - 0.5) * w, ly = hy0 + (j + 0.5) / NY * hh - comY;
       var rx = c * lx - s * ly, ry = s * lx + c * ly, px = f.x + rx, py = f.y + ry;
-      var ys = S.level - this._sideHeight(px), sub = clamp((py - ys) / cellH + 0.5, 0, 1);
-      if (sub <= 0) continue;
-      subSum += sub;
-      var slope = (this._sideHeight(px + 4) - this._sideHeight(px - 4)) / 8;
-      var fb = -g * dA * sub, fbx = -g * dA * sub * slope * 0.5;
-      var pvx = f.vx - f.av * ry, pvy = f.vy + f.av * rx;
-      var wvy = -0.35 * this._sideRate(px) * Math.exp(-Math.max(py - ys, 0) / 15);
-      var fx = fbx - 2 * dA * sub * pvx, fy = fb - 2 * dA * sub * (pvy - wvy);
-      Fx += fx; Fy += fy; T += rx * fy - ry * fx;
+      var ys = S.level - this._sideHeight(px), sub = clamp((py - ys) / cellH + 0.5, 0, 1), depth = Math.max(py - ys, 0);
+      var pvx = f.vx - f.av * ry, pvy = f.vy + f.av * rx, wtr = this._water2d(px, depth), fx = 0, fy = 0;
+      if (sub < 1) {                                                   // the dry part catches the wind
+        var ur = wind - pvx * SIDE.unit;
+        fx += Kw * Math.abs(ur) * ur * cellH * (1 - sub);
+        if (wtr.B > 0 && Math.abs(wtr.jet) > Math.abs(wtr.u)) {        // the roller of a breaking crest slams into it
+          var fr = clamp((py - ys + wtr.roller * wtr.B) / cellH + 0.5, 0, 1) - sub;
+          if (fr > 0) { fx += 1.0 * dA * fr * (wtr.jet - pvx) * wtr.B; hit = Math.max(hit, wtr.B); }
+        }
+      }
+      if (sub > 0) {
+        subSum += sub;
+        if (j === 0 && sub > 0.8) topWet++;
+        var slope = (this._sideHeight(px + 4) - this._sideHeight(px - 4)) / 8;
+        var wvy = -0.35 * this._sideRate(px) * Math.exp(-depth / 15), wu = wtr.u;
+        if (wtr.B > 0 && Math.abs(wtr.jet) > Math.abs(wu)) { var Bd = wtr.B * Math.exp(-depth / (cellH + 6)); wu += (wtr.jet - wu) * Bd; hit = Math.max(hit, Bd); }
+        fx += -g * dA * sub * slope * 0.5 * lift - 2 * dA * sub * (pvx - wu);
+        fy += -g * dA * sub * lift - 2 * dA * sub * (pvy - wvy);
+      }
+      addForce(rx, ry, fx, fy);
+    }
+    if (boat) {                                                        // the sail: wind when it is up, drag when it is under
+      for (var k = 0; k < SAIL2D.length; k++) {
+        var sx = SAIL2D[k][0] * w, sy = SAIL2D[k][1] * H - comY, srx = c * sx - s * sy, sry = s * sx + c * sy, spx = f.x + srx, spy = f.y + sry;
+        var under = clamp((spy - (S.level - this._sideHeight(spx))) / 6 + 0.5, 0, 1), svx = f.vx - f.av * sry, svy = f.vy + f.av * srx, su = wind - svx * SIDE.unit;
+        var sfx = Kw * 1.2 * Math.abs(su) * su * (0.25 * H) * (1 - under) * Math.abs(c) - 1.2 * w * H * 0.08 * under * (svx - this._water2d(spx, 0).u);
+        addForce(srx, sry, sfx, -1.2 * w * H * 0.08 * under * svy);
+      }
     }
     var frac = subSum / (NX * NY);
     if (f.sub < 0.03 && frac >= 0.03 && f.vy > 140) this.splash(f.x, S.level - this._sideHeight(f.x), Math.min(f.vy * w * 0.0009, 18), w * 0.9);
-    f.sub = frac;
+    f.sub = frac; f.topWet = topWet / NX; f.brkHit = Math.max(f.brkHit || 0, hit);
+    // the sea bed under the hull's four corners: a stiff contact with friction, so a sunk crate lies flat
+    var kC = m * g * 5 / H, cC = 2 * Math.sqrt(kC * m / 4) * 0.8, bottomY = this._sideBottom(f.x);
+    if (f.y + Math.max(H, w) > bottomY) {
+      for (var q = 0; q < 4; q++) {
+        var cx2 = (q & 1 ? 0.5 : -0.5) * w, cy2 = (q & 2 ? hy1 : hy0) - comY, crx = c * cx2 - s * cy2, cry = s * cx2 + c * cy2;
+        var pen = f.y + cry - this._sideBottom(f.x + crx);
+        if (pen <= 0) continue;
+        var cvx = f.vx - f.av * cry, cvy = f.vy + f.av * crx, N = Math.max(kC * pen + cC * cvy, 0);
+        addForce(crx, cry, -clamp(cvx * cC, -0.6 * N, 0.6 * N), -N);
+      }
+    }
     f.vx += Fx / m * dt; f.vy += Fy / m * dt; f.av += T / I * dt;
     f.vx *= 1 - 0.05 * dt; f.av *= 1 - 0.3 * dt;
     f.x += f.vx * dt; f.y += f.vy * dt; f.a += f.av * dt;
@@ -1752,8 +2114,25 @@
     var hw = w * 0.5, left = this.opts.scenery ? this._cliffX(f.y) + hw : hw, right = this.opts.scenery ? S.posts[0] - 3.5 - hw : S.worldW - hw;
     if (f.x < left) { f.x = left; f.vx = Math.abs(f.vx) * 0.4; }
     if (f.x > right) { f.x = right; f.vx = -Math.abs(f.vx) * 0.4; }
-    var floor = this._sideBottom(f.x) - H * 0.35;
+    var floor = this._sideBottom(f.x) - H * 0.05;                        // safety net: never through the sea bed
     if (f.y > floor) { f.y = floor; f.vy = Math.min(f.vy, 0); }
+  };
+  // a boat in the side view: water aboard, capsizing (turtled with the sail under) and righting
+  WaterLite.prototype._hull2d = function (f, dt) {
+    var c = Math.cos(f.a);
+    f.flood = clamp((f.flood || 0) + (0.3 * (f.topWet || 0) * (1 - (f.flood || 0)) - (c > 0.5 && (f.topWet || 0) < 0.05 ? 0.06 : 0)) * dt, 0, 1);
+    if (f.righting > 0) return;
+    if (c < 0 && f.sub > 0.02) f.capT = (f.capT || 0) + dt; else if (c > 0.3) f.capT = 0;
+    if (f.capsized && c > 0.5) { f.capsized = false; this._emit('righted', { mode: 'side', x: f.x, y: f.y }); }
+    if (!f.capsized && f.capT > 1.5) { f.capsized = true; f.capsizedAt = this.time; this._emit('capsize', { mode: 'side', x: f.x, y: f.y }); }
+    if (f.capsized && this.opts.autoRight && this.time - f.capsizedAt > 5) this.rightBoat(f);
+  };
+  WaterLite.prototype._righting2d = function (f, dt) {
+    f.righting += dt;
+    var u = smooth(0, 1.6, f.righting);
+    f.a = f.rightFrom + (f.rightTo - f.rightFrom) * u; f.av = 0; f.vy *= Math.exp(-dt * 3);
+    f.flood = Math.max(0, (f.flood || 0) - dt * 0.7);
+    if (f.righting >= 1.6) { f.righting = 0; f.capT = 0; if (f.capsized) { f.capsized = false; this._emit('righted', { mode: 'side', x: f.x, y: f.y }); } }
   };
   // Floating things push each other apart: boxes around the part that floats (rotation ignored), separated
   // along the axis that overlaps least, with a soft, mostly inelastic exchange of speed.
@@ -2073,7 +2452,12 @@
       } else { thr = (inp.up ? 1 : 0) - (inp.down ? 0.5 : 0); steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0); }
       b.speed += (thr * 16 - b.speed) * Math.min(dt * 1.4, 1);
       b.heading += clamp(steer, -1, 1) * dt * 1.7 * clamp(Math.abs(b.speed) / 6, 0.3, 1);
-      var nx = b.x + Math.cos(b.heading) * b.speed * dt, ny = b.y + Math.sin(b.heading) * b.speed * dt;
+      // she makes leeway: the wind and the current set her sideways, and passing ripples shove her
+      var bwd = this.opts.windDir * Math.PI / 180, lee = this._windSpeed() * 0.03, bcd = this.opts.currentDir * Math.PI / 180;
+      var bgx = this._topHeight(b.x + 1, b.y) - this._topHeight(b.x - 1, b.y), bgy = this._topHeight(b.x, b.y + 1) - this._topHeight(b.x, b.y - 1);
+      b.dvx = (b.dvx || 0) + ((Math.cos(bwd) * lee + Math.cos(bcd) * this.opts.current - (b.dvx || 0)) * 0.6 - bgx * 12) * dt;
+      b.dvy = (b.dvy || 0) + ((Math.sin(bwd) * lee + Math.sin(bcd) * this.opts.current - (b.dvy || 0)) * 0.6 - bgy * 12) * dt;
+      var nx = b.x + (Math.cos(b.heading) * b.speed + b.dvx) * dt, ny = b.y + (Math.sin(b.heading) * b.speed + b.dvy) * dt;
       if (!this._isLand(nx, ny) && nx > 2 && ny > 2 && nx < T.worldW - 2 && ny < T.worldH - 2) { b.x = nx; b.y = ny; } else b.speed *= -0.3;
       b.a = b.heading + Math.PI / 2;
       if (Math.abs(b.speed) > 1) {
@@ -2085,9 +2469,10 @@
     this.floaters.forEach(function (f) {
       if (f === b) return;
       var gx = self._topHeight(f.x + 1, f.y) - self._topHeight(f.x - 1, f.y), gy = self._topHeight(f.x, f.y + 1) - self._topHeight(f.x, f.y - 1);
-      var wd = self.opts.windDir * Math.PI / 180, wind = self._windSpeed() * 0.004;
-      f.vx = (f.vx - gx * 30 * dt + Math.cos(wd) * wind * dt) * Math.exp(-dt * 0.8);
-      f.vy = (f.vy - gy * 30 * dt + Math.sin(wd) * wind * dt) * Math.exp(-dt * 0.8);
+      // leeway (about 3% of the wind) and the current set them drifting; ripples push them about
+      var wd = self.opts.windDir * Math.PI / 180, wind = self._windSpeed() * 0.024, cd = self.opts.currentDir * Math.PI / 180, cu = self.opts.current * 0.8;
+      f.vx = (f.vx - gx * 30 * dt + (Math.cos(wd) * wind + Math.cos(cd) * cu) * dt) * Math.exp(-dt * 0.8);
+      f.vy = (f.vy - gy * 30 * dt + (Math.sin(wd) * wind + Math.sin(cd) * cu) * dt) * Math.exp(-dt * 0.8);
       var nx2 = f.x + f.vx * dt, ny2 = f.y + f.vy * dt;
       if (!self._isLand(nx2, ny2) && nx2 > 1 && ny2 > 1 && nx2 < T.worldW - 1 && ny2 < T.worldH - 1) { f.x = nx2; f.y = ny2; } else { f.vx *= -0.5; f.vy *= -0.5; }
       f.a += (f.vx - f.vy) * dt * 0.3;
@@ -2447,7 +2832,8 @@
     if (typeof o.land === 'function') o.land = 'custom';
     return o;
   };
-  // events: 'splash' { mode, x, y (z in 3D), power, radius }, 'lightning' { strength }, 'contextlost', 'contextrestored'
+  // events: 'splash' { mode, x, y (z in 3D), power, radius }, 'lightning' { strength }, 'capsize' and 'righted' { mode, x, y or z },
+  // 'contextlost', 'contextrestored'
   WaterLite.prototype.on = function (type, fn) { (this._ev[type] = this._ev[type] || []).push(fn); return this; };
   WaterLite.prototype.off = function (type, fn) {
     var L = this._ev[type];

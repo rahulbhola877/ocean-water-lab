@@ -36,7 +36,7 @@ The demo also has seven game-look scenes, about 90 parameters on its Advanced ta
 3. **Four cascades.** The tiles are 1024 m, 128 m, 16 m and 3 m. Each tile keeps one band of wavelengths, so together they cover everything from swell to ripples without repeating visibly.
 4. **Filtering.** A mesh vertex reads the mip level that matches its spacing. A pixel reads with hardware anisotropic filtering. The `mom` texture stores squared slopes, so the slope variance the filter removed comes back as roughness, LEAN-mapping style. Distant water glitters correctly instead of aliasing or turning to mirror.
 5. **Whitecaps.** Foam forms where the breaking-scale cascades compress the surface (Jacobian below a threshold). Coverage follows the Monahan & O'Muircheartaigh wind relation. `calibrateFoam()` measures the threshold on the actual surface.
-6. **Physics.** `fft_query.frag` writes height, water velocity and acceleration on a 5×5 grid around each floating body, using three frames of displacement. The host reads it back asynchronously (one or two frames old). `WaterPatch` / `samplePatch` moves the data forward to the physics time, and the buoyancy model runs on it: Archimedes lift, Froude-Krylov force and drag.
+6. **Physics.** `fft_query.frag` writes height, water velocity and acceleration on a 5×5 grid around each floating body, using three frames of displacement. The host reads it back asynchronously (one or two frames old). `WaterPatch` / `samplePatch` moves the data forward to the physics time, and the buoyancy model runs on it: Archimedes lift, Froude-Krylov force and drag (see "The buoyancy model" below).
 
 Per-frame GPU work: 4 cascades × (1 + 2·log2 N + 1) full-screen passes over N×N texels, plus mip generation. N is 256 on "High" and 128 on "Low".
 
@@ -65,6 +65,32 @@ physics step   sea.advance(dt)                      // or sea.setTime(t) for loc
 frame          sea.packForGpu(originX, originZ)     // upload gpuA, gpuB as two vec4[64] arrays
 vertex         world = rest + waterDisplace(rest - origin, 2.0 * spacing, depth)
 ```
+
+## The buoyancy model
+
+`buoyancyWith(sampleFn, ...)` (JS), `water::buoyancyWith` (C++) and `WaterPhysics.Buoyancy` (C#) compute one force per hull sample point. Apply each at its point with your engine's add-force-at-position. The three ports give the same numbers (see "What was verified").
+
+Always on:
+- **Archimedes lift** for the part of each cell under the surface.
+- **Froude-Krylov force:** the pressure field of the wave itself, which is what makes a floating body follow the orbital motion.
+- **Drag** against the moving water, linear plus quadratic.
+
+Set in the config when you want them:
+
+| Field | Default | What it does |
+|---|---|---|
+| `decayWavelength` | the sea's peak wavelength (`WaveSet.buoyancy`), else 0 | wave motion fades with depth as exp(-2π d / L), so a sunk object or a deep keel hardly feels the waves |
+| `breakSpeed` | 0 (off) | where a crest breaks, its roller runs forward at this speed (m/s) and carries the body; this is what knocks boats down in a storm. The demo uses about half the speed of the peak waves, at most 10 m/s |
+| `breakAccel` | 0.35 | a crest breaks where the water accelerates downward faster than this, in g. A linear wave sum rarely gets to 0.35, so set it with `sea.breakingAccel(share, minWavelength)`, which measures the threshold exceeded on that share of the sea. For the share, 0.4 × `whitecapCoverage(wind)` matches the visible whitecaps (the rest is foam left behind) |
+| `rollerHeight` | 0.12 Hs + 0.3 m when breaking is on (`WaveSet.buoyancy`), else 0 | how far the aerated roller rides above the smooth surface; it slams into the topsides there, which is what rolls a boat over |
+| `windX`, `windZ` | 0 | wind at the body (m/s, a couple of metres up); drags on the parts above water |
+| `airDrag`, `windArea` | 1, from the hull volume | drag coefficient and side area above water |
+| `currentX`, `currentZ` | 0 | a steady current (m/s), the same at every depth |
+| `linearDragH` | `linearDrag` | linear drag sideways. Lower (the demo uses 0.15) lets the wind set a floating object drifting at a few percent of the wind speed, as real flotsam does |
+
+In C++ and C#, `-1` means "the default" for `decayWavelength`, `rollerHeight` and `linearDragH`.
+
+What the forces do not cover is left to your game: flooding (the demo cuts the lift of an open hull by up to 60 % as green water comes over the deck edge, only while she floats upright), capsize detection and righting, collisions between bodies, and engines, keels and sails.
 
 Choose the analytic sea when you cannot run render-to-texture passes, when you need deterministic physics without GPU read-back (for example lockstep multiplayer), or on very low-end hardware.
 
@@ -130,11 +156,11 @@ The demo's scene looks, water bodies and every parameter range are in `demo/inde
 
 - **FFT against a direct sum.** The GPU FFT output was compared with a direct CPU sum of the same spectrum at 40 points per cascade. Heights, displacements, slopes and Jacobian terms agree to within the 16-bit float storage (largest error 0.9 mm on 1.6 m waves). Measured RMS wave height matches the spectrum's to within sampling noise (`tests/fft_check.mjs`).
 - **Whitecaps.** After calibration, measured whitecap coverage matches the target within about ±25% across sea states (2.0% against 1.9% in a rough sea, 7.6% against 6.3% in a gale).
-- **Physics.** Floating objects stay at their waterline through instant sea-state changes. A crate's centre sits within 1 cm of the read-back surface height, and the asynchronous read-back path runs in the real frame loop.
-- **Analytic sea.** GPU and CPU heights agree to under 1 mm in a 2 m sea and under 1 cm in a 6 m gale. The C++ port matches the JavaScript reference to 5e-13 (`tests/crosscheck.*`). `WaterPatch` sampling and buoyancy were unit-tested in C++.
+- **Physics.** Floating objects stay at their waterline through instant sea-state changes. A crate's centre sits within 1 cm of the read-back surface height, and the asynchronous read-back path runs in the real frame loop. `tools/physics.mjs` runs the demo's bodies through a breeze, a hurricane, a turned-over boat, deep water, wind, a current and the surf, and checks the outcomes (for example, wave motion 10 m down is within 6 % of exp(-2π d / L); a crate drifts at about 1.5 % of a 9 m/s wind; a 1 m/s current carries it at 1.0 m/s).
+- **Analytic sea.** GPU and CPU heights agree to under 1 mm in a 2 m sea and under 1 cm in a 6 m gale. The C++ port matches the JavaScript reference to 7e-13, including the breaking, roller, wind and current terms and `breakingAccel` (`tests/crosscheck.*`). `WaterPatch` sampling and buoyancy were unit-tested in C++.
 - **HLSL.** All six libraries are generated mechanically from the GLSL and type-checked with clang's HLSL front end. They have not been compiled with FXC/DXC or run on a Direct3D device.
 - **Surf, tide, weather, wakes.** Checked by eye in a software renderer, from above the breakers and at water level, and with debug views of breaking and phase. The JavaScript surf and rogue-wave heights use the same formulas as the shaders, but have not been compared numerically against the GPU.
-- **C#.** Ported by hand; no C# compiler was available, so it has not been compiled.
+- **C#.** Ported by hand, line for line with the C++; no C# compiler was available, so it has not been compiled.
 - **Performance.** Only measured on a software renderer: about 13 fps at 800×500 on High, on a CPU. Frame rates on real GPUs were not measured.
 
 ## What it does not do
@@ -145,7 +171,7 @@ The demo's scene looks, water bodies and every parameter range are in `demo/inde
 - Shadows cast onto the water surface itself, underwater light shafts
 - Rivers and flow maps
 - A true dispersive Kelvin wake. The demo boat draws the wedge with foam and the ripple buffer, which is a plain wave equation
-- Collisions between floating bodies (the forces are meant for your engine's rigid bodies)
+- Collisions between floating bodies in the kit (the forces are meant for your engine's rigid bodies; the demo adds box contacts of its own)
 - A volumetric fluid solver: water cannot pour, fill or flood
 
 ## Sources for the formulas
