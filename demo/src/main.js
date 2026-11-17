@@ -2693,7 +2693,14 @@
   }
   function filmStatus(text) { var rs = $('rec-status'); rs.hidden = !text; rs.textContent = text || ''; }
   function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-  function nextFrame() { return new Promise(function (r) { requestAnimationFrame(function () { r(); }); }); }
+  // the next display frame, or a moment later when nothing is being displayed (a hidden tab or an
+  // occluded window never calls requestAnimationFrame, and a film render must keep going)
+  function nextFrame() {
+    return new Promise(function (r) {
+      var done = false, go = function () { if (!done) { done = true; r(); } };
+      requestAnimationFrame(go); setTimeout(go, 40);
+    });
+  }
   async function renderFilm(w, h, fps) {
     if (film.on) { film.cancel = true; return; }
     if (!filmSupported()) { $('note').textContent = 'This browser has no WebCodecs, so use Record tour (real time) instead.'; return; }
@@ -3347,7 +3354,7 @@
 
   var hot = window.claude && window.claude.hot;
   if (hot && hot.snapshot) hot.snapshot(function () { return state; });
-  function boot(saved) { requestAnimationFrame(function () { setTimeout(function () { start(saved); }, 0); }); }
+  function boot(saved) { nextFrame().then(function () { setTimeout(function () { start(saved); }, 0); }); }
   if (TEST) start({});
   else if (hot && hot.ready) hot.ready(boot); else boot((hot && hot.data) || {});
 })();

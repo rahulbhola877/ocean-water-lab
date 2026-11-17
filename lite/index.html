@@ -174,6 +174,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
 <div class="err" id="err"></div>
 
 <script src="water-lite.js"></script>
+<script src="vendor/mp4-muxer.min.js"></script>
 <script>
 (function () {
   'use strict';
@@ -352,6 +353,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
 
   var last = performance.now(), frames = 0, acc = 0;
   function tick(now) {
+    if (clock.film) { last = now; requestAnimationFrame(tick); return; }   // the film render draws the frames itself
     var dt = Math.min(Math.max((now - last) / 1000, 0), 0.1); last = now;
     if (water.opts.mode === 'side') water.camera2d.x += ((water.input.right ? 1 : 0) - (water.input.left ? 1 : 0)) * 260 * dt;
     if (steer && water.opts.mode === 'top' && water.boat) {   // steer toward the finger: turn, and sail while it is ahead
@@ -376,61 +378,77 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
   }
 
   // ---- live demo: window.waterTour() plays a scripted walk through the controls, with a pointer
-  //      that really clicks them, and captions (it is how the demo video was recorded) ----------
+  //      that really clicks them, and captions. window.waterFilm() renders the same walk frame by
+  //      frame into a 1080p MP4 (WebCodecs), however slow the GPU, settings panel included ---------
   var tourCss = '#tw-cur{position:fixed;left:0;top:0;width:26px;height:26px;z-index:60;pointer-events:none;transform:translate(-40px,-40px);filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}' +
     '#tw-ring{position:fixed;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid #fff;border-radius:50%;z-index:59;pointer-events:none;opacity:0}' +
     '#tw-cap{position:fixed;bottom:52px;z-index:58;pointer-events:none;padding:11px 18px 12px;border-radius:10px;background:rgba(8,16,28,.82);color:#fff;' +
-    'transition:opacity .35s,transform .35s;opacity:0;transform:translateY(8px);max-width:620px;box-shadow:0 8px 24px rgba(0,0,0,.3)}' +
+    'transition:opacity .35s,transform .35s;opacity:0;max-width:620px;box-shadow:0 8px 24px rgba(0,0,0,.3)}' +
     '#tw-cap b{display:block;font:700 19px/1.25 var(--sans);letter-spacing:.01em}#tw-cap span{display:block;font:500 13.5px/1.4 var(--sans);color:#c9d6e4;margin-top:3px}' +
-    '#tw-cap.on{opacity:1;transform:none}' +
+    '#tw-cap.on{opacity:1}' +
     '#tw-title{position:fixed;top:0;bottom:0;right:0;z-index:57;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;' +
     'background:radial-gradient(ellipse at center,rgba(6,14,26,.62),rgba(6,14,26,.2) 70%);color:#fff;text-align:center;transition:opacity .6s;opacity:0}' +
     '#tw-title.on{opacity:1}#tw-title b{font:800 54px/1 var(--sans);letter-spacing:.01em;text-shadow:0 3px 18px rgba(0,0,0,.5)}' +
     '#tw-title span{font:500 18px/1.4 var(--sans);color:#dce8f4;max-width:560px;text-shadow:0 2px 10px rgba(0,0,0,.6)}' +
     '#tw-title i{font:600 13px var(--mono);font-style:normal;color:#9fc2e8;letter-spacing:.06em}' +
-    '#tw-slate{position:fixed;inset:0;z-index:70;background:#000;pointer-events:none;transition:opacity .45s;opacity:0}' +
+    '#tw-slate{position:fixed;inset:0;z-index:70;background:#000;pointer-events:none;opacity:0}' +
     'body.touring .hint{display:none}';
+  // time for the tour: real time when it plays live, film time when it is being rendered
+  var clock = { film: false, t: 0, waits: [] };
+  function nowMs() { return clock.film ? clock.t : performance.now(); }
+  function sleep(ms) { return new Promise(function (r) { if (clock.film) clock.waits.push({ at: clock.t + ms, r: r }); else setTimeout(r, ms); }); }
+  function frame() { return new Promise(function (r) { if (clock.film) clock.waits.push({ at: clock.t, r: r }); else requestAnimationFrame(r); }); }
   var tw = null;
   function tourUI() {
     if (tw) return tw;
     var st = document.createElement('style'); st.textContent = tourCss; document.head.appendChild(st);
     var mk = function (tag, id, html) { var e = document.createElement(tag); e.id = id; if (html) e.innerHTML = html; document.body.appendChild(e); return e; };
     tw = {
-      cur: mk('div', 'tw-cur', '<svg viewBox="0 0 26 26" width="26" height="26"><path d="M3 2 L3 21 L8.2 16.4 L11.7 24 L15 22.5 L11.6 15.1 L18.5 15 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>'),
+      cur: mk('div', 'tw-cur', '<svg viewBox="0 0 26 26" width="26" height="26"><path d="' + CURSOR + '" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>'),
       ring: mk('div', 'tw-ring'), cap: mk('div', 'tw-cap', '<b></b><span></span>'), title: mk('div', 'tw-title', '<b></b><span></span><i></i>'), slate: mk('div', 'tw-slate'),
-      x: -40, y: -40
+      x: -40, y: -40, ringT: -1e9, ringX: 0, ringY: 0,
+      capS: { on: false, t: -1e9, a: '', b: '' }, titleS: { on: false, t: -1e9, a: '', b: '', c: '' }, slateS: { from: 0, to: 0, t: 0, ms: 1 }
     };
     return tw;
   }
-  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-  function frame() { return new Promise(function (r) { requestAnimationFrame(r); }); }
+  var CURSOR = 'M3 2 L3 21 L8.2 16.4 L11.7 24 L15 22.5 L11.6 15.1 L18.5 15 Z';
   function waterLeft() { return small.matches ? 0 : panel.getBoundingClientRect().right; }
   function placeOverlays() {                                      // captions and titles sit over the water, not the panel
     var l = waterLeft(), w = innerWidth - l;
-    tw.cap.style.left = (l + w / 2) + 'px'; tw.cap.style.transform = tw.cap.classList.contains('on') ? 'translateX(-50%)' : 'translate(-50%, 8px)';
+    tw.cap.style.left = (l + w / 2) + 'px'; tw.cap.style.transform = tw.capS.on ? 'translateX(-50%)' : 'translate(-50%, 8px)';
     tw.title.style.left = l + 'px';
   }
   function caption(a, b) {
-    tw.cap.querySelector('b').textContent = a || ''; tw.cap.querySelector('span').textContent = b || '';
+    var c = tw.capS;
+    if (a) { c.a = a; c.b = b || ''; tw.cap.querySelector('b').textContent = a; tw.cap.querySelector('span').textContent = b || ''; }
+    if (!!a !== c.on) { c.on = !!a; c.t = nowMs(); }
     tw.cap.classList.toggle('on', !!a); placeOverlays();
   }
   function titleCard(a, b, c) {
-    tw.title.querySelector('b').textContent = a || ''; tw.title.querySelector('span').textContent = b || ''; tw.title.querySelector('i').textContent = c || '';
+    var s = tw.titleS;
+    if (a) { s.a = a; s.b = b || ''; s.c = c || ''; tw.title.querySelector('b').textContent = a; tw.title.querySelector('span').textContent = b || ''; tw.title.querySelector('i').textContent = c || ''; }
+    if (!!a !== s.on) { s.on = !!a; s.t = nowMs(); }
     tw.title.classList.toggle('on', !!a); placeOverlays();
   }
+  function slateTo(o, ms) {
+    var s = tw.slateS; s.from = slateAlpha(); s.to = o; s.t = nowMs(); s.ms = Math.max(ms, 1);
+    tw.slate.style.transition = ms ? 'opacity ' + ms + 'ms' : 'none'; tw.slate.style.opacity = String(o);
+  }
+  function slateAlpha() { var s = tw.slateS, f = Math.min((nowMs() - s.t) / s.ms, 1); return s.from + (s.to - s.from) * f; }
+  function placeCursor() { tw.cur.style.transform = 'translate(' + (tw.x - 3) + 'px,' + (tw.y - 2) + 'px)'; }
   async function moveTo(x, y, ms) {
     ms = ms === undefined ? 520 : ms;
-    var x0 = tw.x, y0 = tw.y, t0 = performance.now();
+    var x0 = tw.x, y0 = tw.y, t0 = nowMs();
     while (true) {
-      var f = Math.min((performance.now() - t0) / Math.max(ms, 1), 1), e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;
-      tw.x = x0 + (x - x0) * e; tw.y = y0 + (y - y0) * e;
-      tw.cur.style.transform = 'translate(' + (tw.x - 3) + 'px,' + (tw.y - 2) + 'px)';
+      var f = Math.min((nowMs() - t0) / Math.max(ms, 1), 1), e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;
+      tw.x = x0 + (x - x0) * e; tw.y = y0 + (y - y0) * e; placeCursor();
       if (f >= 1) break;
       await frame();
     }
   }
   function ripple() {
     var r = tw.ring;
+    tw.ringT = nowMs(); tw.ringX = tw.x; tw.ringY = tw.y;
     r.style.transition = 'none'; r.style.left = tw.x + 'px'; r.style.top = tw.y + 'px'; r.style.opacity = '0.95'; r.style.transform = 'scale(0.35)';
     void r.offsetWidth;
     r.style.transition = 'transform .45s ease-out, opacity .45s ease-out'; r.style.transform = 'scale(1.25)'; r.style.opacity = '0';
@@ -439,9 +457,9 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     if (!panel.contains(el)) return;
     var pr = panel.getBoundingClientRect(), er = el.getBoundingClientRect();
     if (er.top >= pr.top + 30 && er.bottom <= pr.bottom - 30) return;
-    var target = panel.scrollTop + (er.top - pr.top) - pr.height * 0.32, from = panel.scrollTop, t0 = performance.now();
+    var target = panel.scrollTop + (er.top - pr.top) - pr.height * 0.32, from = panel.scrollTop, t0 = nowMs();
     while (true) {
-      var f = Math.min((performance.now() - t0) / 420, 1), e = 1 - Math.pow(1 - f, 3);
+      var f = Math.min((nowMs() - t0) / 420, 1), e = 1 - Math.pow(1 - f, 3);
       panel.scrollTop = from + (target - from) * e;
       if (f >= 1) break;
       await frame();
@@ -460,11 +478,11 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     var r = el.getBoundingClientRect(), lo = +el.min, hi = +el.max, from = +el.value;
     var px = function (v) { return r.left + 8 + (r.width - 16) * (v - lo) / (hi - lo); };
     await moveTo(px(from), r.top + r.height / 2); ripple();
-    var t0 = performance.now(); ms = ms || 900;
+    var t0 = nowMs(); ms = ms || 900;
     while (true) {
-      var f = Math.min((performance.now() - t0) / ms, 1), e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2, v = from + (to - from) * e;
+      var f = Math.min((nowMs() - t0) / ms, 1), e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2, v = from + (to - from) * e;
       el.value = v; el.dispatchEvent(new Event('input'));
-      tw.x = px(+el.value); tw.cur.style.transform = 'translate(' + (tw.x - 3) + 'px,' + (tw.y - 2) + 'px)';
+      tw.x = px(+el.value); placeCursor();
       if (f >= 1) break;
       await frame();
     }
@@ -477,21 +495,20 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     await sleep(after === undefined ? 350 : after);
   }
   var touring = false;
-  window.waterTour = async function () {
-    if (touring) return; touring = true;
+  async function runTour() {
     tourUI(); document.body.classList.add('touring');
-    var slate = tw.slate; slate.style.transition = 'none'; slate.style.opacity = '1';
+    slateTo(1, 0);
     // the starting scene, set while the screen is black
     water.setOptions({ mode: '3d', style: 'realistic', mood: 'day', palette: 'auto', quality: 'high', rain: -1, wind: 7, waveHeight: 1, colors: null,
       pixelSize: 0, dither: -1, floaters: true, boat: true, scenery: true, reflections: true, seed: 7, current: 0, autoRight: true });
     if (follow3d) $('follow3d').click();
-    water.cam.auto = true; water.cam.dist = 34; water.cam.target = [0, 0, -5];
+    water.cam.auto = true; water.cam.dist = 34; water.cam.pitch = 0.3; water.cam.target = [0, 0, -5];
     sync(); panel.scrollTop = 0; setFolded(false);
-    await sleep(1500);
-    slate.style.transition = 'opacity .5s'; slate.style.opacity = '0';
+    tw.x = innerWidth * 0.62; tw.y = innerHeight * 0.55; placeCursor();
+    await sleep(1200);
+    slateTo(0, 500);
     titleCard('Water Lite', 'Clear, stylized water for low-end browser games', 'ONE JS FILE · WEBGL 1 · NO DEPENDENCIES');
-    await sleep(3300); titleCard(null);
-    await moveTo(innerWidth * 0.6, innerHeight * 0.5, 0); await sleep(300);
+    await sleep(3300); titleCard(null); await sleep(300);
 
     caption('Six art styles, one engine', 'Realistic, toon, pixel art, low poly, retro 32-bit and ink');
     var styles = ['toon', 'pixel', 'lowpoly', 'retro', 'ink', 'realistic'];
@@ -513,7 +530,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     if (b) { b.q = [1, 0, 0, 0]; b.w = [0, 0, 0]; }
     await sleep(2600); water.rightBoat(); await sleep(2300);
     await press('#follow3d', 200);
-    water.cam.auto = true; water.cam.pitch = 0.32;
+    water.cam.auto = true; water.cam.pitch = 0.3;
     await slide('rain', 0, 500);
     await press('[data-mood="day"]', 300);
 
@@ -543,8 +560,8 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
 
     caption('Built for low-end devices', 'From Potato to High, or Auto, which adapts the resolution to keep frames smooth');
     await press('[data-quality="potato"]', 1300);
-    await press('[data-quality="high"]', 900);
-    await press('[data-quality="auto"]', 600);
+    await press('[data-quality="auto"]', 900);
+    await press('[data-quality="high"]', 600);
 
     caption('Drop it into your game', 'Every setting becomes code: one file, water.update(dt) and water.render()');
     await press('#copy', 1800);
@@ -556,12 +573,162 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     await moveTo(innerWidth + 40, innerHeight * 0.7, 500);
     titleCard('Water Lite 2.3', 'Open source, with the full Ocean Water Lab beside it', 'GITHUB.COM/RAHULBHOLA877/OCEAN-WATER-LAB');
     await sleep(3800);
-    slate.style.transition = 'opacity .6s'; slate.style.opacity = '1';
+    slateTo(1, 600);
     await sleep(1400);
-    titleCard(null); document.body.classList.remove('touring'); touring = false;
-    setTimeout(function () { slate.style.opacity = '0'; }, 1500);
+    titleCard(null); document.body.classList.remove('touring');
+  }
+  window.waterTour = async function () {
+    if (touring) return 'already playing';
+    touring = true;
+    try { await runTour(); } finally { touring = false; setTimeout(function () { if (tw) slateTo(0, 450); }, 1500); }
     return 'done';
   };
+
+  // the film: the tour in film time, each frame the water, the settings panel (drawn from the page
+  // itself through an SVG image) and the pointer and captions, encoded to H.264 and saved as MP4
+  var filmState = { on: false, blob: null, note: '' };
+  function round(cx, x, y, w, h, r) { cx.beginPath(); cx.moveTo(x + r, y); cx.arcTo(x + w, y, x + w, y + h, r); cx.arcTo(x + w, y + h, x, y + h, r); cx.arcTo(x, y + h, x, y, r); cx.arcTo(x, y, x + w, y, r); cx.closePath(); }
+  function wrapLines(cx, text, maxW) {
+    var words = text.split(' '), lines = [], line = '';
+    words.forEach(function (w) { var t = line ? line + ' ' + w : w; if (cx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; });
+    if (line) lines.push(line);
+    return lines;
+  }
+  var panelImg = null, panelSig = '';
+  async function panelImage(s) {                                  // the settings panel as it is now, rasterised at film scale
+    var vals = Array.prototype.map.call(panel.querySelectorAll('input,textarea'), function (e) { return e.value; }).join('|');
+    var sig = panel.scrollTop + '|' + vals + '|' + panel.innerHTML;
+    if (panelImg && sig === panelSig) return panelImg;
+    var css = Array.prototype.map.call(document.querySelectorAll('style'), function (e) { return e.textContent; }).join('\n').replace(/@media \(max-width: 700px\)/g, '@media (max-width: 1px)');
+    var r = panel.getBoundingClientRect(), clone = panel.cloneNode(true), src = panel.querySelectorAll('input,textarea'), dst = clone.querySelectorAll('input,textarea');
+    Array.prototype.forEach.call(src, function (e, i) { if (e.tagName === 'TEXTAREA') dst[i].textContent = e.value; else dst[i].setAttribute('value', e.value); });
+    var inner = document.createElement('div');
+    inner.setAttribute('style', 'display:flex;flex-direction:column;gap:12px;margin-top:' + (-panel.scrollTop) + 'px');
+    while (clone.firstChild) inner.appendChild(clone.firstChild);
+    clone.appendChild(inner);
+    clone.setAttribute('style', 'position:static;margin:0;width:' + r.width + 'px;height:' + r.height + 'px;max-height:none;overflow:hidden');
+    var html = '<div xmlns="http://www.w3.org/1999/xhtml"><style>' + css + '</style>' + new XMLSerializer().serializeToString(clone) + '</div>';
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + Math.round(r.width * s) + '" height="' + Math.round(r.height * s) + '" viewBox="0 0 ' + r.width + ' ' + r.height + '">' +
+      '<foreignObject width="' + r.width + '" height="' + r.height + '">' + html + '</foreignObject></svg>';
+    var img = new Image();
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    try { await img.decode(); panelImg = img; panelSig = sig; } catch (e) { /* keep the last good one */ }
+    return panelImg;
+  }
+  var cursorPath = null;
+  function drawOverlays(cx, s, W, H) {
+    var t = nowMs(), l = waterLeft(), wl = l * s, ww = W - wl;
+    // title card
+    var ts = tw.titleS, ta = ts.on ? Math.min((t - ts.t) / 600, 1) : 1 - Math.min((t - ts.t) / 600, 1);
+    if (ta > 0.001 && ts.a) {
+      cx.save(); cx.globalAlpha = ta;
+      var g = cx.createRadialGradient(wl + ww / 2, H / 2, 0, wl + ww / 2, H / 2, Math.max(ww, H) * 0.6);
+      g.addColorStop(0, 'rgba(6,14,26,0.62)'); g.addColorStop(0.7, 'rgba(6,14,26,0.2)'); g.addColorStop(1, 'rgba(6,14,26,0.2)');
+      cx.fillStyle = g; cx.fillRect(wl, 0, ww, H);
+      cx.textAlign = 'center'; cx.fillStyle = '#fff'; cx.shadowColor = 'rgba(0,0,0,0.5)'; cx.shadowBlur = 18 * s;
+      cx.font = '800 ' + 54 * s + 'px system-ui, "Segoe UI", sans-serif'; cx.fillText(ts.a, wl + ww / 2, H / 2 - 14 * s);
+      cx.font = '500 ' + 18 * s + 'px system-ui, "Segoe UI", sans-serif'; cx.fillStyle = '#dce8f4'; cx.fillText(ts.b, wl + ww / 2, H / 2 + 26 * s);
+      cx.font = '600 ' + 13 * s + 'px ui-monospace, Consolas, monospace'; cx.fillStyle = '#9fc2e8'; cx.fillText(ts.c, wl + ww / 2, H / 2 + 56 * s);
+      cx.restore();
+    }
+    // caption
+    var cs = tw.capS, ca = cs.on ? Math.min((t - cs.t) / 350, 1) : 1 - Math.min((t - cs.t) / 350, 1);
+    if (ca > 0.001 && cs.a) {
+      cx.save(); cx.globalAlpha = ca;
+      cx.font = '700 ' + 19 * s + 'px system-ui, "Segoe UI", sans-serif';
+      var tw1 = cx.measureText(cs.a).width;
+      cx.font = '500 ' + 13.5 * s + 'px system-ui, "Segoe UI", sans-serif';
+      var lines = wrapLines(cx, cs.b, 584 * s), tw2 = Math.max.apply(null, lines.map(function (x) { return cx.measureText(x).width; }).concat([0]));
+      var bw = Math.min(Math.max(tw1, tw2), 584 * s) + 36 * s, bh = (11 + 24 + 3 + lines.length * 19 + 12) * s;
+      var bx = wl + ww / 2 - bw / 2, by = H - 52 * s - bh + (1 - ca) * 8 * s;
+      cx.shadowColor = 'rgba(0,0,0,0.3)'; cx.shadowBlur = 24 * s; cx.shadowOffsetY = 8 * s;
+      cx.fillStyle = 'rgba(8,16,28,0.82)'; round(cx, bx, by, bw, bh, 10 * s); cx.fill();
+      cx.shadowColor = 'transparent';
+      cx.textAlign = 'left'; cx.fillStyle = '#fff'; cx.font = '700 ' + 19 * s + 'px system-ui, "Segoe UI", sans-serif'; cx.fillText(cs.a, bx + 18 * s, by + 31 * s);
+      cx.fillStyle = '#c9d6e4'; cx.font = '500 ' + 13.5 * s + 'px system-ui, "Segoe UI", sans-serif';
+      lines.forEach(function (ln, i) { cx.fillText(ln, bx + 18 * s, by + (54 + i * 19) * s); });
+      cx.restore();
+    }
+    // click ring and pointer
+    var rf = (t - tw.ringT) / 450;
+    if (rf >= 0 && rf < 1) {
+      cx.save(); cx.globalAlpha = 0.95 * (1 - rf); cx.strokeStyle = '#fff'; cx.lineWidth = 3 * s;
+      cx.beginPath(); cx.arc(tw.ringX * s, tw.ringY * s, 17 * s * (0.35 + 0.9 * (1 - Math.pow(1 - rf, 2))), 0, Math.PI * 2); cx.stroke(); cx.restore();
+    }
+    if (!cursorPath) cursorPath = new Path2D(CURSOR);
+    cx.save(); cx.translate((tw.x - 3) * s, (tw.y - 2) * s); cx.scale(s, s);
+    cx.shadowColor = 'rgba(0,0,0,0.45)'; cx.shadowBlur = 3 * s; cx.shadowOffsetY = 2 * s;
+    cx.fillStyle = '#fff'; cx.fill(cursorPath); cx.shadowColor = 'transparent';
+    cx.lineWidth = 1.6; cx.lineJoin = 'round'; cx.strokeStyle = '#111'; cx.stroke(cursorPath); cx.restore();
+    // fade to and from black
+    var sa = slateAlpha();
+    if (sa > 0.001) { cx.save(); cx.globalAlpha = sa; cx.fillStyle = '#000'; cx.fillRect(0, 0, W, H); cx.restore(); }
+  }
+  function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
+  window.waterFilm = async function (opt) {
+    opt = opt || {};
+    if (touring || filmState.on) return 'busy';
+    if (!window.VideoEncoder || !window.VideoFrame || !window.Mp4Muxer) return 'This browser has no WebCodecs video encoder.';
+    var fps = opt.fps || 30, H = opt.height || 1080, W = Math.round(innerWidth * H / innerHeight / 2) * 2, s = H / innerHeight;
+    var tries = ['avc1.640034', 'avc1.640033', 'avc1.640028', 'vp09.00.41.08'], vc = null;
+    for (var k = 0; k < tries.length && !vc; k++) {
+      var cfg = { codec: tries[k], width: W, height: H, bitrate: opt.bitrate || 12e6, framerate: fps };
+      try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) vc = cfg; } catch (e) { /* try the next */ }
+    }
+    if (!vc) return 'No video encoder for ' + W + 'x' + H + ' here.';
+    var mux = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), fastStart: 'in-memory', video: { codec: /^avc/.test(vc.codec) ? 'avc' : 'vp9', width: W, height: H, frameRate: fps } });
+    var err = null, enc = new VideoEncoder({ output: function (c, m) { mux.addVideoChunk(c, m); }, error: function (e) { err = e; } });
+    enc.configure(vc);
+    var fc = document.createElement('canvas'); fc.width = W; fc.height = H;
+    var cx = fc.getContext('2d');
+    filmState.on = true; touring = true; clock.film = true; clock.t = 0; clock.waits = [];
+    var done = false, n = 0, t0 = performance.now();
+    var tourP = runTour().then(function () { done = true; }, function (e) { err = e; done = true; });
+    try {
+      while (!done && !err) {
+        clock.t += 1000 / fps;
+        var due = clock.waits.filter(function (w) { return w.at <= clock.t + 0.01; });
+        clock.waits = clock.waits.filter(function (w) { return w.at > clock.t + 0.01; });
+        due.forEach(function (w) { w.r(); });
+        await settle();
+        water.update(1 / fps); water.render();
+        cx.imageSmoothingEnabled = canvas.width >= W * 0.6;
+        cx.drawImage(canvas, 0, 0, W, H);
+        cx.imageSmoothingEnabled = true;
+        if (!small.matches) {
+          var img = await panelImage(s), pr = panel.getBoundingClientRect();
+          if (img) {
+            cx.save(); cx.shadowColor = 'rgba(6,16,30,0.25)'; cx.shadowBlur = 28 * s; cx.shadowOffsetY = 8 * s;
+            round(cx, pr.left * s, pr.top * s, pr.width * s, pr.height * s, 10 * s); cx.fillStyle = 'rgba(250,251,252,0.92)'; cx.fill(); cx.restore();
+            cx.save(); round(cx, pr.left * s, pr.top * s, pr.width * s, pr.height * s, 10 * s); cx.clip(); cx.drawImage(img, pr.left * s, pr.top * s, pr.width * s, pr.height * s); cx.restore();
+          }
+        }
+        drawOverlays(cx, s, W, H);
+        var vf = new VideoFrame(fc, { timestamp: Math.round(n * 1e6 / fps), duration: Math.round(1e6 / fps) });
+        enc.encode(vf, { keyFrame: n % (fps * 2) === 0 }); vf.close(); n++;
+        while (enc.encodeQueueSize > 4) await new Promise(function (r) { setTimeout(r, 4); });
+        filmState.note = 'frame ' + n + ', ' + (n / fps).toFixed(1) + ' s of film in ' + ((performance.now() - t0) / 1000).toFixed(0) + ' s';
+      }
+      await tourP;
+      await enc.flush();
+      if (err) throw err;
+      mux.finalize();
+      filmState.blob = new Blob([mux.target.buffer], { type: 'video/mp4' });
+      var a = document.createElement('a'), url = URL.createObjectURL(filmState.blob);
+      a.href = url; a.download = opt.name || 'water-lite-demo-' + H + 'p.mp4'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 120000);
+      filmState.note = 'saved ' + (filmState.blob.size / 1048576).toFixed(1) + ' MB, ' + n + ' frames, ' + W + 'x' + H;
+      return filmState.note;
+    } catch (e) {
+      filmState.note = 'failed: ' + (e && e.message || e);
+      return filmState.note;
+    } finally {
+      try { enc.close(); } catch (e2) { /* closed */ }
+      clock.film = false; filmState.on = false; touring = false; last = performance.now();
+      setTimeout(function () { if (tw) slateTo(0, 450); }, 1500);
+    }
+  };
+  window.waterFilmStatus = function () { return filmState.note; };
   if (/[#&]tour\b/.test(location.hash)) setTimeout(window.waterTour, 1200);
 
   sync();
