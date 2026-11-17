@@ -2,6 +2,8 @@
 
 Clear, stylized real-time water for low-end browser games. It is one JavaScript file with no dependencies, and it runs on WebGL 1 without extensions.
 
+[![Water Lite live demo: every view, style, mood and button (74 s video)](../media/water-lite-demo.jpg)](../media/water-lite-demo.mp4)
+
 ![Water Lite in three views and six art styles](../media/lite-grid.jpg)
 
 The water is see-through. Everything under the surface is drawn first: the seabed, rocks, seaweed, fish, and the sunken half of anything floating. The water is then drawn from that picture:
@@ -68,6 +70,8 @@ Lightning:
 ## Try it
 
 Open `lite/index.html` in a browser. The demo has every option, and **Copy code** gives you the exact `new WaterLite(...)` call for what you see.
+
+In the browser console, `waterTour()` plays a guided walk through every control, and `waterFilm()` renders the same walk frame by frame to a 1080p MP4 (Chrome, Edge or Safari with WebCodecs); that is how [the demo video](../media/water-lite-demo.mp4) was made.
 
 On a phone the settings fold into a sheet at the bottom, so the water stays in view. In the top view, press and hold to steer the boat toward your finger, or use WASD and the arrow keys on a keyboard.
 

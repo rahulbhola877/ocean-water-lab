@@ -4,6 +4,8 @@ media/video/
 *.mp4
 *.webm
 *.mov
+!media/ocean-lab-whats-new.mp4
+!media/water-lite-demo.mp4
 .DS_Store
 Thumbs.db
 kit/tests/shim/

@@ -4,12 +4,16 @@
 
 ![Golden Coast with the advanced panel open](media/golden-coast-panel.jpg)
 
+**Videos:** [what's new in 1.5](media/ocean-lab-whats-new.mp4) (50 s, with sound) and [Water Lite, live demo](media/water-lite-demo.mp4) (74 s). Both were rendered frame by frame in the browser on an ordinary laptop GPU.
+
+[![What's new in Ocean Water Lab 1.5: breaking crests, capsizing, lightning, storm sea, drift](media/ocean-lab-whats-new.jpg)](media/ocean-lab-whats-new.mp4)
+
 | | | |
 |---|---|---|
 | ![Big Surf](media/big-surf.jpg) | ![Moonlit, bioluminescent wake](media/moonlit-bioluminescence.jpg) | ![Rogue wave](media/rogue-wave.jpg) |
 | Big Surf: breakers follow the depth, foam tears into streaks | Moonlit: plankton glow in the wake | A rogue wave group focusing as it passes |
 | ![Speedboat at sunset](media/speedboat-sunset.jpg) | ![Hurricane](media/hurricane.jpg) | ![Glass Calm](media/glass-calm.jpg) |
-| Speedboat with wake and spray | Hurricane: rain, gusts, spindrift, lens drops | Glass Calm: a near mirror at dawn |
+| Speedboat with wake and spray | Hurricane: rain, gusts, spindrift, breaking crests | Glass Calm: a near mirror at dawn |
 
 ## Try it
 
@@ -77,6 +81,8 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - **The same physics in every style:** things float, boats leave wakes, ripples bounce off coasts, and waves wash up beaches. In 3D, crates, buoys and a sailing boat are rigid bodies; breaking crests, wind, currents and flooding can knock the boat flat or turn her over, with `capsize` and `righted` events.
 - **Day, sunset, night and storm,** with rain, lightning, stars and glowing foam at night, in every view and style.
 - **Ready for real games:** scrolling 2D cameras and bigger maps, splash and lightning events for sound, an `auto` quality that follows the device, a one-call device benchmark, and recovery from a lost GPU context.
+
+[![Water Lite live demo: every view, style, mood and button](media/water-lite-demo.jpg)](media/water-lite-demo.mp4)
 
 ![Water Lite in three views and six art styles](media/lite-grid.jpg)
 
