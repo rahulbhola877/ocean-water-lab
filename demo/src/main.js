@@ -1202,7 +1202,7 @@
     var cover = state.clouds;
     p.i('uCloudNoise', UNITS.cloudNoise).i('uWeather', UNITS.weather)
       .f('uCloudLayer', state.cloudBase, Math.max(state.cloudTop, state.cloudBase + 200), cover, mix(0.9, 1.7, smoothstep(0.7, 1.0, cover)) * state.cloudDensity)
-      .f('uCloudShape', state.cloudType, 6500, 950, 0.34).v3('uCloudWind', cloudWind).f('uFlash', flash.level)
+      .f('uCloudShape', state.cloudType, 6500, 950, 0.34).v3('uCloudWind', cloudWind).f('uFlash', flashLight(1.2)).f('uBoltDir', Math.cos(bolt.az), Math.sin(bolt.az))
       .f('uMieScale', sun.mie);
     return p;
   }
@@ -1294,6 +1294,9 @@
   }
 
   var flash = { level: 0, timer: 3 };
+  // light from a strike, scaled to how the scene is exposed: a dim storm needs far less of it to
+  // look blinding than a clear day would, and it must never wash the whole picture out
+  function flashLight(k) { return flash.level * k / Math.max(sun.exposure * Math.pow(2, state.ev), 1); }
   var UNITS = { cloudNoise: 15, weather: 16, cloudTex: 17, envHist: 18, shadow: 19 };
 
   // ---- sun shadow cascades, centred on what the camera looks at ---------------
@@ -1393,7 +1396,9 @@
     bindTex(0, null);
     bindTex(UNITS.envHist, envPrev.color);
     gl.bindFramebuffer(gl.FRAMEBUFFER, envCur.fbo); gl.viewport(0, 0, envCur.w, envCur.h);
-    setSky(setFrame(prog.env.use())).i('uEnvHistory', UNITS.envHist).f('uHistory', clouds.envValid ? 0.75 : 0).f('uFrame', clouds.frame % 64)
+    var flashing = flash.level > 0.02 || flash.was;
+    flash.was = flash.level > 0.02;
+    setSky(setFrame(prog.env.use())).i('uEnvHistory', UNITS.envHist).f('uHistory', clouds.envValid ? (flashing ? 0.15 : 0.75) : 0).f('uFrame', clouds.frame % 64)
       .i('uSteps', hiQ ? 28 : 18).i('uLightSteps', hiQ ? 4 : 3).v3('uCloudAmbBottom', ambBottom);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     rt.env = envCur; rt.envB = envPrev; clouds.envValid = true;
@@ -1405,7 +1410,7 @@
     bindTex(UNITS.cloudTex, cprev.color);
     gl.bindFramebuffer(gl.FRAMEBUFFER, ccur.fbo); gl.viewport(0, 0, ccur.w, ccur.h);
     setSky(setFrame(prog.cloudPass.use())).v3('uCamRight', cam.right).v3('uCamUp', cam.up).v3('uCamFwd', cam.fwd).f('uTanFov', ty0 * cam.aspect, ty0)
-      .i('uCloudHistory', UNITS.cloudTex).m4('uPrevRot', clouds.prevRot).f('uHistory', clouds.valid && location.hash.indexOf('nohist') < 0 ? 0.82 : 0).f('uFrame', clouds.frame % 64)
+      .i('uCloudHistory', UNITS.cloudTex).m4('uPrevRot', clouds.prevRot).f('uHistory', clouds.valid && location.hash.indexOf('nohist') < 0 ? (flashing ? 0.2 : 0.82) : 0).f('uFrame', clouds.frame % 64)
       .i('uSteps', hiQ ? 44 : 28).i('uLightSteps', hiQ ? 5 : 3).v3('uCloudAmbBottom', ambBottom);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     clouds.cur = 1 - clouds.cur; clouds.valid = true;
@@ -1429,7 +1434,7 @@
     var ty = Math.tan(cam.fov / 2);
     setSky(setFrame(prog.background.use())).v3('uCamRight', cam.right).v3('uCamUp', cam.up).v3('uCamFwd', cam.fwd).f('uTanFov', ty * cam.aspect, ty)
       .i('uCloudTex', UNITS.cloudTex).f('uMoon', night.moon[0], night.moon[1], night.moon[2], night.moon[3])
-      .f('uBolt', bolt.az, bolt.top, bolt.seed, flash.level > 0.02 ? flash.level * 60 : 0)
+      .f('uBolt', bolt.az, bolt.top, bolt.seed, flash.level > 0.02 ? flashLight(40) : 0)
       .f('uRainSky', state.rain * state.rainShafts * 0.9, simTime % 1000, Math.atan2(state.cloudBase, 3500));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true);
@@ -1466,7 +1471,7 @@
       .f('uRogueA', rogue.cx, rogue.cz, rogue.dx, rogue.dz).f('uRogueB', rogue.h, rogue.k, rogue.phase, rogue.len)
       .f('uGust', state.gusts * smoothstep(2, 6, state.wind), state.gustSize, gustDrift[0], gustDrift[1])
       .f('uSlick', state.slicks * (1 - smoothstep(9, 14, state.wind)), state.slickSpace, Math.cos(state.windDir * DEG), Math.sin(state.windDir * DEG))
-      .v3('uBio', bioGlow())
+      .v3('uBio', bioGlow()).f('uFlashLight', Math.cos(bolt.az) * 0.94, 0.34, Math.sin(bolt.az) * 0.94, flashLight(1.8))
       .i('uReflection', REFL_UNIT).i('uReflDepth', REFL_UNIT + 4);
     if (SIMS) {
       pw.i('uRipple', 3).f('uRippleRect', R.cx, R.cz, 1 / R.size, 1 / R.res)
@@ -1510,7 +1515,7 @@
       .f('uExposure', sun.exposure * Math.pow(2, state.ev) * (cam.underwater ? 1.5 : 1))
       .i('uTonemap', ['aces', 'agx', 'filmic', 'reinhard'].indexOf(state.tonemap)).v3('uWhiteBalance', wb)
       .f('uGrade', state.sat, state.vib, state.contrast, state.vignette).v3('uShadowTint', sh).v3('uHighTint', hi).f('uSplit', state.split)
-      .f('uLens', state.grain, state.ca, state.sharpen, simTime % 100).f('uTexel', 1 / rt.w, 1 / rt.h).f('uFlashScreen', flash.level * 0.5)
+      .f('uLens', state.grain, state.ca, state.sharpen, simTime % 100).f('uTexel', 1 / rt.w, 1 / rt.h).f('uFlashScreen', flash.level * 0.04)
       .f('uLensRain', cam.underwater ? 0 : state.lensRain * Math.max(state.rain, 0.25 * smoothstep(14, 22, state.wind)), simTime % 1000)
       .f('uFade', tour.on ? tour.fade : 0).f('uRays', rays[0], rays[1], rays[2], 1 / Math.max(sun.exposure * Math.pow(2, state.ev), 1e-3));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -2202,7 +2207,7 @@
     if (state.rain > 0.01 && !cam.underwater) {
       var wd = state.windDir * DEG, drift = 1 + state.wind * 0.35;
       setFrame(prog.rain.use()).m4('uViewProj', cam.viewProj).f('uFall', Math.cos(wd) * drift, -9.5, Math.sin(wd) * drift)
-        .f('uBox', 18).f('uShutter', 0.05 * state.rainSize).f('uDropSize', state.rainSize).f('uAmount', Math.min(0.35 + state.rain * 0.8, 1));
+        .f('uBox', 18).f('uShutter', 0.024 * state.rainSize).f('uDropSize', state.rainSize).f('uAmount', Math.min(0.3 + state.rain * 0.6, 0.85));
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.bindVertexArray(part.rainVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, Math.round(14000 * Math.pow(state.rain, 1.3)));

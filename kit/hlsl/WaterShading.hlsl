@@ -86,7 +86,12 @@ float3 waterBody(float3 refraction, float thickness, float3 N, float3 V, float3 
     float through = pow(waterSaturate(dot(V, -Lb)), 3.0);
     float facing = 0.15 * waterSaturate(L.y * 3.0);
     float sss = (through + facing) * crest * m.sssStrength;
-    float3 scatter = deep + m.sssColor * sunColor * (sss / WATER_PI);
+    // daylight from the sky behind a wave shining through its thin crest: the green glow of a
+    // storm sea, which the sun alone cannot give once clouds have hidden it
+    float3 Ls = normalize(float3(-V.x, 0.35, -V.z) + N * 0.4);
+    float behind = pow(waterSaturate(dot(V, -Ls)), 2.0);
+    float3 skyGlow = m.sssColor * skyAmbient * (behind * crest * crest * m.sssStrength * 0.35);
+    float3 scatter = deep + m.sssColor * sunColor * (sss / WATER_PI) + skyGlow;
     return refraction * T + scatter * (1.0 - T);
 }
 
@@ -149,22 +154,32 @@ float waterNoise(float2 p) {
 // ages the holes grow until only threads between them are left, then nothing.
 float waterFoamMask(float2 p, float2 windDir, float density, float footprint) {
     if (density <= 0.02) return 0.0;
-    float2 q = float2(dot(p, windDir) * 0.6, dot(p, float2(-windDir.y, windDir.x)));
+    float2 q = float2(dot(p, windDir) * 0.45, dot(p, float2(-windDir.y, windDir.x)));     // drawn out along the wind
     float patches = waterNoise(q * 0.27) * 0.6 + waterNoise(q * 0.71 + 9.0) * 0.4;
-    float d = clamp(density * (0.6 + 0.8 * patches), 0.0, 1.0);
+    float d = clamp(density * (0.75 + 0.5 * patches), 0.0, 1.0);
     float visible = smoothstep(0.02, 0.15, density);
     float farFoam = smoothstep(0.10, 0.65, d);                                 // too far away to see any structure
     float wLace = clamp(0.30 / footprint - 0.5, 0.0, 1.0);
     if (wLace <= 0.0) return farFoam * visible;
     float wFine = clamp(0.09 / footprint - 0.5, 0.0, 1.0);
-    float2 bend = float2(waterNoise(q * 1.1 + 4.0), waterNoise(q * 1.1 + 19.0)) * 1.8;
-    float f1 = waterCells(q * 2.3 + bend).x;                               // 0 at the middle of a hole
+    float2 bend = float2(waterNoise(q * 1.1 + 4.0), waterNoise(q * 1.1 + 19.0)) * 1.8
+                + float2(waterNoise(q * 0.35 + 7.0), waterNoise(q * 0.35 + 11.0)) * 2.6;   // no two holes alike
+    float2 c1 = waterCells(q * 2.3 + bend);                                // x: to the nearest cell centre, y: the next
     float f2 = wFine > 0.0 ? waterCells(q * 7.9 + bend * 3.0 + 31.0).x : 0.45;
     float hole = (1.0 - d) * 0.95;                                         // hole radius grows as the foam thins
-    float sheet = smoothstep(hole - 0.10, hole + 0.14, f1 + 0.45 * (f2 - 0.45) * wFine);
+    float sheet = smoothstep(hole - 0.10, hole + 0.14, c1.x + 0.45 * (f2 - 0.45) * wFine);
+    // as it ages, what is left lies along the walls between the holes: threads of every
+    // thickness, broken in places, with a finer net in patches; never a regular grid
+    float2 c2 = waterCells(q * 4.1 + bend * 1.7 + 57.0);
+    float wv = waterNoise(q * 1.3 + 3.0);
+    float w1 = 1.0 - smoothstep(0.02 + 0.3 * d, 0.08 + 0.36 * d, (c1.y - c1.x) / (0.6 + 0.8 * wv));
+    float w2 = 1.0 - smoothstep(0.02 + 0.2 * d, 0.07 + 0.25 * d, c2.y - c2.x);
+    float lacy = smoothstep(0.35, 0.7, waterNoise(q * 0.16 + 41.0) + 0.25 * d);   // lace comes in patches, not everywhere
+    float wall = lacy * max(w1 * smoothstep(0.4, 0.75, wv + 0.3 * d), 0.5 * w2 * smoothstep(0.6, 0.9, waterNoise(q * 0.9 + 21.0) + 0.4 * d));
     float bubbles = smoothstep(hole * 0.7 - 0.12, hole * 0.7 + 0.16, f2 + 0.12);
-    float nearFoam = sheet * lerp(1.0, bubbles, 0.55 * wFine);
-    return lerp(farFoam, nearFoam, wLace) * visible;
+    float nearFoam = max(sheet * smoothstep(0.25, 0.7, d), wall * smoothstep(0.03, 0.2, d)) * lerp(1.0, bubbles, 0.55 * wFine);
+    nearFoam *= lerp(0.55, 1.0, d);                                        // thin old foam lets the water show through
+    return lerp(farFoam * lerp(0.6, 1.0, d), nearFoam, wLace) * visible;
 }
 
 // Strong wind draws old foam out into long streaks along the wind (Beaufort 7 and up).
@@ -173,9 +188,9 @@ float waterWindStreaks(float2 p, float2 windDir, float amount, float footprint) 
     amount *= 1.0 - smoothstep(1.5, 5.0, footprint);
     if (amount <= 0.0) return 0.0;
     float2 q = float2(dot(p, windDir), dot(p, float2(-windDir.y, windDir.x)));
-    q.y += 7.0 * waterNoise(q * float2(0.018, 0.06));                        // streaks wander a little
-    float n = waterNoise(q * float2(0.03, 0.42)) * 0.6 + waterNoise(q * float2(0.071, 1.13) + 13.0) * 0.4;
-    return amount * smoothstep(0.50, 0.78, n);
+    q.y += 7.0 * waterNoise(q * float2(0.012, 0.06));                        // streaks wander a little
+    float n = waterNoise(q * float2(0.02, 0.6)) * 0.6 + waterNoise(q * float2(0.05, 1.6) + 13.0) * 0.4;
+    return amount * smoothstep(0.58, 0.8, n);
 }
 
 // Rain: rings spreading from random drops. Returns a slope to subtract from the

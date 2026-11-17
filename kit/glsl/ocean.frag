@@ -45,6 +45,7 @@ uniform float uRain;               // 0..1
 uniform vec4 uLook;                // artistic gains, 1 = physical: reflection, sun glitter, refraction bend, foam brightness
 #ifdef WATER_WEATHER
 uniform vec3 uBio;                 // bioluminescence: glow colour x intensity, multiplied with the foam (0 by day)
+uniform vec4 uFlashLight;          // lightning: direction towards the strike (xyz), irradiance (w); 0 when there is none
 #endif
 #ifdef WATER_PLANAR
 uniform sampler2D uReflection;     // scene mirrored in the sea plane; a = 1 where something was drawn
@@ -240,6 +241,12 @@ void main() {
                           thickness, crest, foamMask, wd.lostVar, mat);
 #ifdef WATER_WEATHER
     col += uBio * foamMask * (0.55 + 0.45 * waterWeatherNoise(restWorld * 3.0 + uTime * 2.0));   // plankton lit by the churn
+    if (uFlashLight.w > 0.0) {                                                    // the strike lights crests and foam on its side
+        vec3 fc = vec3(0.82, 0.88, 1.0) * uFlashLight.w;
+        float fl = waterSaturate(dot(N, uFlashLight.xyz) * 0.6 + 0.4);
+        col += waterSunSpecular(N, V, uFlashLight.xyz, fc, waterAlpha2(mat.roughness, wd.lostVar) + 0.03) * 0.6;
+        col += fc * (fl / WATER_PI) * (foamMask * uLook.w + (1.0 - foamMask) * (uScatterColor * 3.0 + 0.02 * crest));
+    }
 #endif
 
     // soft edge where the surface meets geometry

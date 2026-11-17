@@ -23,7 +23,7 @@ void main() {
     vec3 w = p + axis * aCorner.y + side * aCorner.x;
     vQ = aCorner;
     float d = length(p - uCamPos);
-    vFade = smoothstep(uBox, uBox * 0.4, d) * smoothstep(0.4, 1.5, d) * step(0.0, p.y + 0.3);
+    vFade = smoothstep(uBox, uBox * 0.4, d) * smoothstep(2.0, 5.0, d) * step(0.0, p.y + 0.3);   // none smeared across the screen right in front of the eye
     gl_Position = uViewProj * vec4(w, 1.0);
 }
 //@@ rain.frag
@@ -35,7 +35,7 @@ out vec4 fragColor;
 // drops refract the sky behind them and catch a little sun: drawn additively
 void main() {
     float a = (1.0 - vQ.x * vQ.x) * sin(3.14159 * vQ.y) * vFade * uAmount;
-    vec3 c = envAmbient(uEnvMaxLod) * 0.55 + uSunColor * 0.006;
+    vec3 c = envAmbient(uEnvMaxLod) * 0.42 + uSunColor * 0.006;
     fragColor = vec4(encodeHDR(c * a), 0.0);
 }
 //@@ spray.vert

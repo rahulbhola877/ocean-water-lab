@@ -74,7 +74,7 @@
     ['rainSize', 'weather', 'Drop size', 0.4, 2.5, 0.01, 1, 'x'],
     ['rainSplash', 'weather', 'Rain splashes', 0, 2, 0.05, 1, 'x'],
     ['rainShafts', 'weather', 'Rain curtains', 0, 1, 0.01, 0.6, 'f2'],
-    ['lensRain', 'weather', 'Lens drops', 0, 1, 0.01, 0, 'f2'],
+    ['lensRain', 'weather', 'Camera lens drops', 0, 1, 0.01, 0, 'f2'],
     ['gusts', 'weather', 'Gust fronts', 0, 1, 0.01, 0.3, 'f2'],
     ['gustSize', 'weather', 'Gust size', 15, 400, 5, 90, 'm0'],
     ['spindrift', 'weather', 'Spindrift', 0, 2, 0.05, 1, 'x'],
@@ -182,21 +182,21 @@
     // category-4 storm: torrential rain, gust fronts, spindrift, lightning and rogue waves
     hurricane: {
       label: 'Hurricane',
-      p: { wind: 26, windDir: 20, fetch: 1000, gamma: 4.2, chop: 1.2, swell: 4.0, swellLen: 240, swellDir: 30, foam: 1.5,
-           foamLife: 6, streaks: 0.55, sunElev: 12, sunAz: 200, clouds: 1.0, cloudType: 1.0, cloudBase: 450, cloudTop: 7000,
-           cloudDensity: 1.8, cloudSpeed: 3.5, haze: 3, fog: 2.4, rain: 1, rainSize: 1.1, rainSplash: 1.6, rainShafts: 1, lensRain: 0.45,
-           gusts: 0.9, gustSize: 140, spindrift: 1.7, lightning: 0.85, rogue: 16, rogueEvery: 45, look: 'emerald', sss: 2.2,
-           surf: 3.5, surfPeriod: 13, tide: 1.2, temp: -0.25, sat: 0.65, contrast: 1.25, vignette: 0.7, ev: -0.5, grain: 0.2,
-           split: 0.35, shadowTint: '#3e5a66', highTint: '#9aa49c', palms: false, boat: true, vessel: 'speedboat', autopilot: true },
+      p: { wind: 26, windDir: 20, fetch: 1000, gamma: 4.2, chop: 1.2, swell: 4.0, swellLen: 240, swellDir: 30, foam: 1.0,
+           foamLife: 3.5, streaks: 0.5, sunElev: 12, sunAz: 200, clouds: 0.96, cloudType: 1.0, cloudBase: 450, cloudTop: 7000,
+           cloudDensity: 1.8, cloudSpeed: 3.5, haze: 2.2, fog: 1.8, rain: 1, rainSize: 0.9, rainSplash: 1.6, rainShafts: 1,
+           gusts: 0.9, gustSize: 140, spindrift: 1.7, lightning: 0.85, rogue: 16, rogueEvery: 45, look: 'emerald', sss: 2.4,
+           surf: 3.5, surfPeriod: 13, tide: 1.2, temp: -0.14, sat: 0.88, contrast: 1.1, vignette: 0.32, ev: -0.15,
+           split: 0.18, shadowTint: '#3e5a66', highTint: '#9aa49c', palms: false, boat: true, vessel: 'speedboat', autopilot: true },
       cam: [60, -60, 2.6, 0.13, 42], boat: [80, -60, 40]
     },
     // gale, huge swell, rain, lightning, green light through the crests (pirate-adventure storm)
     storm: {
       label: 'Pirate Storm',
-      p: { wind: 19, windDir: 60, fetch: 600, gamma: 3.8, chop: 1.18, swell: 3.0, swellLen: 200, swellDir: 70, foam: 1.3,
-           foamLife: 5, streaks: 0.7, sunElev: 18, sunAz: 120, clouds: 0.97, cloudType: 1.0, cloudBase: 600, cloudTop: 6000,
+      p: { wind: 19, windDir: 60, fetch: 600, gamma: 3.8, chop: 1.18, swell: 3.0, swellLen: 200, swellDir: 70, foam: 1.0,
+           foamLife: 3.5, streaks: 0.6, sunElev: 18, sunAz: 120, clouds: 0.88, cloudType: 1.0, cloudBase: 600, cloudTop: 6000,
            cloudDensity: 1.4, cloudSpeed: 2.5, haze: 1.5, fog: 3, rain: 0.85, lightning: 0.55, look: 'emerald', sss: 2.6,
-           surf: 2.4, surfPeriod: 12, temp: -0.22, sat: 0.72, contrast: 1.2, vignette: 0.6, ev: -0.7, grain: 0.15, split: 0.3, shadowTint: '#4a6a78', highTint: '#9aa8a0',
+           surf: 2.4, surfPeriod: 12, temp: -0.12, sat: 0.92, contrast: 1.08, vignette: 0.32, ev: -0.25, split: 0.18, shadowTint: '#4a6a78', highTint: '#9aa8a0',
            palms: false, boat: true, vessel: 'ship', autopilot: true },
       cam: [60, -60, 3.0, 0.06, 34], boat: [80, -60, 40]
     },

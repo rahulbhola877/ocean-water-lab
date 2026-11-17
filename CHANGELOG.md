@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.1
+
+Storm lighting, made for a game rather than for footage through a wet camera.
+
+- **No camera artefacts in the storms.** Raindrops on the lens are off (the setting stays, as *Camera lens drops*, for anyone who wants it), and film grain and the heavy vignette are gone from Hurricane and Pirate Storm. Rain no longer smears long streaks across the screen right in front of the eye.
+- **Lightning lights the storm instead of whitening the screen.** A strike lights the cloud around it from inside, brightest low in the deck, and the rest of the sky catches only a little. The sea catches the strike on its side: glints on the waves and lit foam. All of it is scaled to the scene's exposure, so a dark storm no longer washes out to white; the screen-wide brightening is down from 50 % to 4 %, and the sky's frame smoothing stands aside during a strike so the light comes and goes with it.
+- **Green light through the crests.** Daylight from the sky behind a wave now shines through its thin crest (kit `waterBody`, GLSL and HLSL), so an overcast sea gets the teal glow of real storm water even with the sun hidden.
+- **Foam that reads as foam.** Old foam turns into lace along the walls between bubbles, in patches and with threads of every thickness, instead of a grey sheet full of dark holes; foam is drawn out along the wind, thin old foam lets the water through, and wind streaks are long thin lines. Hurricane and Pirate Storm keep their foam for 3.5 s instead of 5–6 s, at normal strength.
+- **A graded storm, not a grey one:** more colour and less crush in Hurricane and Pirate Storm, and Pirate Storm shows the shape of its clouds (88 % cover) with a lighter band on the horizon.
+
 ## 1.5.0
 
 Physics: the gaps in storms, under water and at the shore, closed in both engines. Waves can now capsize boats.

@@ -9,7 +9,8 @@ uniform sampler2D uWeather;             // r = coverage variation, g = cloud typ
 uniform vec4 uCloudLayer;               // bottom (m), top (m), coverage 0..1, density
 uniform vec4 uCloudShape;               // type (0 stratus .. 1 towering), base scale (m), detail scale (m), detail erosion
 uniform vec3 uCloudWind;                // accumulated drift, metres
-uniform float uFlash;                   // lightning flash, 0..1
+uniform float uFlash;                   // lightning flash, already scaled to the exposure
+uniform vec2 uBoltDir;                  // horizontal direction of the strike from the camera (x, z)
 uniform float uMieScale;                // aerosols (haze between the eye and the clouds)
 #define CLOUD_RE 6360000.0
 #define CLOUD_SIGMA 0.035               // extinction per metre at density 1
@@ -104,8 +105,16 @@ vec4 cloudMarch(vec3 ro, vec3 rd, int steps, int lightSteps, float jitter, vec3 
             float tauCol = sigma * thick * (1.0 - hf) * 0.5;
             float diffuse = max(uSunDir.y, 0.03) * 0.8 / (1.0 + 0.11 * tauCol);
             vec3 sunGrey = mix(sunCol, vec3(dot(sunCol, vec3(0.2126, 0.7152, 0.0722))), 0.5);   // many bounces wash the colour out
+            // a strike lights the cloud around it from inside, brightest low in the deck; the rest of
+            // the sky only catches a little of it
+            float boltGlow = 0.0;
+            if (uFlash > 0.0) {
+                vec2 bd = p.xz - uCamPos.xz;
+                float ca = dot(bd, uBoltDir) / max(length(bd), 1.0);
+                boltGlow = uFlash * (exp((ca - 1.0) * 12.0) * (1.4 - hf) * 1.3 + 0.08);
+            }
             vec3 Ls = sunCol * (scat * mix(1.0, powder, 0.5) * 6.5 * 3.14159) + sunGrey * diffuse
-                    + mix(ambBottom, ambTop * 1.6, clamp(hf * 1.3, 0.0, 1.0)) + vec3(uFlash * 6.0);
+                    + mix(ambBottom, ambTop * 1.6, clamp(hf * 1.3, 0.0, 1.0)) + vec3(0.82, 0.88, 1.0) * boltGlow;
             float Ts = exp(-sigma * dt);
             float absorbed = T * (1.0 - Ts);
             L += Ls * absorbed;
