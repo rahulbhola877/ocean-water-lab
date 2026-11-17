@@ -163,14 +163,15 @@ float waterFoamMask(float2 p, float2 windDir, float density, float footprint) {
     if (wLace <= 0.0) return farFoam * visible;
     float wFine = clamp(0.09 / footprint - 0.5, 0.0, 1.0);
     float2 bend = float2(waterNoise(q * 1.1 + 4.0), waterNoise(q * 1.1 + 19.0)) * 1.8
-                + float2(waterNoise(q * 0.35 + 7.0), waterNoise(q * 0.35 + 11.0)) * 2.6;   // no two holes alike
-    float2 c1 = waterCells(q * 2.3 + bend);                                // x: to the nearest cell centre, y: the next
+              + float2(waterNoise(q * 0.35 + 7.0), waterNoise(q * 0.35 + 11.0)) * 2.6;   // no two holes alike
+    float2 qs = float2(q.x * 0.6, q.y);                                        // holes and threads drawn out further: streaks, not bubbles
+    float2 c1 = waterCells(qs * 2.3 + bend);                                 // x: to the nearest cell centre, y: the next
     float f2 = wFine > 0.0 ? waterCells(q * 7.9 + bend * 3.0 + 31.0).x : 0.45;
     float hole = (1.0 - d) * 0.95;                                         // hole radius grows as the foam thins
     float sheet = smoothstep(hole - 0.10, hole + 0.14, c1.x + 0.45 * (f2 - 0.45) * wFine);
     // as it ages, what is left lies along the walls between the holes: threads of every
     // thickness, broken in places, with a finer net in patches; never a regular grid
-    float2 c2 = waterCells(q * 4.1 + bend * 1.7 + 57.0);
+    float2 c2 = waterCells(qs * 4.1 + bend * 1.7 + 57.0);
     float wv = waterNoise(q * 1.3 + 3.0);
     float w1 = 1.0 - smoothstep(0.02 + 0.3 * d, 0.08 + 0.36 * d, (c1.y - c1.x) / (0.6 + 0.8 * wv));
     float w2 = 1.0 - smoothstep(0.02 + 0.2 * d, 0.07 + 0.25 * d, c2.y - c2.x);
@@ -178,7 +179,7 @@ float waterFoamMask(float2 p, float2 windDir, float density, float footprint) {
     float wall = lacy * max(w1 * smoothstep(0.4, 0.75, wv + 0.3 * d), 0.5 * w2 * smoothstep(0.6, 0.9, waterNoise(q * 0.9 + 21.0) + 0.4 * d));
     float bubbles = smoothstep(hole * 0.7 - 0.12, hole * 0.7 + 0.16, f2 + 0.12);
     float nearFoam = max(sheet * smoothstep(0.25, 0.7, d), wall * smoothstep(0.03, 0.2, d)) * lerp(1.0, bubbles, 0.55 * wFine);
-    nearFoam *= lerp(0.55, 1.0, d);                                        // thin old foam lets the water show through
+    nearFoam *= lerp(0.55, 1.0, d);                                         // thin old foam lets the water show through
     return lerp(farFoam * lerp(0.6, 1.0, d), nearFoam, wLace) * visible;
 }
 

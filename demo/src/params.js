@@ -182,8 +182,8 @@
     // category-4 storm: torrential rain, gust fronts, spindrift, lightning and rogue waves
     hurricane: {
       label: 'Hurricane',
-      p: { wind: 26, windDir: 20, fetch: 1000, gamma: 4.2, chop: 1.2, swell: 4.0, swellLen: 240, swellDir: 30, foam: 1.0,
-           foamLife: 3.5, streaks: 0.5, sunElev: 12, sunAz: 200, clouds: 0.96, cloudType: 1.0, cloudBase: 450, cloudTop: 7000,
+      p: { wind: 26, windDir: 20, fetch: 1000, gamma: 4.2, chop: 1.2, swell: 4.0, swellLen: 240, swellDir: 30, foam: 0.8,
+           foamLife: 2.8, streaks: 0.5, sunElev: 12, sunAz: 200, clouds: 0.96, cloudType: 1.0, cloudBase: 450, cloudTop: 7000,
            cloudDensity: 1.8, cloudSpeed: 3.5, haze: 2.2, fog: 1.8, rain: 1, rainSize: 0.9, rainSplash: 1.6, rainShafts: 1,
            gusts: 0.9, gustSize: 140, spindrift: 1.7, lightning: 0.85, rogue: 16, rogueEvery: 45, look: 'emerald', sss: 2.4,
            surf: 3.5, surfPeriod: 13, tide: 1.2, temp: -0.14, sat: 0.88, contrast: 1.1, vignette: 0.32, ev: -0.15,

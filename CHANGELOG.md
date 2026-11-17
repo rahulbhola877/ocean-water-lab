@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.2
+
+Demo videos, and what making them showed up.
+
+- **Videos.** A one-minute look at what is new in the lab (`media/ocean-lab-whats-new.mp4`) and a live demo of Water Lite with every button (`media/water-lite-demo.mp4`), both rendered frame by frame in the browser on an ordinary laptop GPU.
+- **The speedboat no longer sinks in a hurricane.** Her cockpit bails itself and a pump runs while she is upright, and water aboard costs at most 40 % of her lift (was 60 %), so in a storm she settles awash and keeps riding instead of slowly going under. A boat turned over still floods and stays over until she is righted.
+- **Storm foam in streaks along the wind,** as at Beaufort 8 and up, instead of a sheet with round holes in it (kit `waterFoamMask`, GLSL and HLSL). Hurricane has a little less foam (0.8) that lasts 2.8 s.
+- **What's new tour:** the breaking-crest shot looks down from higher, so the boat stays in view over the crests.
+- **Film rendering keeps going in a background tab.** *Render film* in the lab no longer stalls when the page is hidden. The Water Lite demo page can render its tour to a 1080p MP4 too: `waterFilm()` in the console (`waterTour()` plays it live).
+
 ## 1.5.1
 
 Storm lighting, made for a game rather than for footage through a wet camera.

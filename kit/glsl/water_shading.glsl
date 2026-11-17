@@ -157,13 +157,14 @@ float waterFoamMask(vec2 p, vec2 windDir, float density, float footprint) {
     float wFine = clamp(0.09 / footprint - 0.5, 0.0, 1.0);
     vec2 bend = vec2(waterNoise(q * 1.1 + 4.0), waterNoise(q * 1.1 + 19.0)) * 1.8
               + vec2(waterNoise(q * 0.35 + 7.0), waterNoise(q * 0.35 + 11.0)) * 2.6;   // no two holes alike
-    vec2 c1 = waterCells(q * 2.3 + bend);                                  // x: to the nearest cell centre, y: the next
+    vec2 qs = vec2(q.x * 0.6, q.y);                                        // holes and threads drawn out further: streaks, not bubbles
+    vec2 c1 = waterCells(qs * 2.3 + bend);                                 // x: to the nearest cell centre, y: the next
     float f2 = wFine > 0.0 ? waterCells(q * 7.9 + bend * 3.0 + 31.0).x : 0.45;
     float hole = (1.0 - d) * 0.95;                                         // hole radius grows as the foam thins
     float sheet = smoothstep(hole - 0.10, hole + 0.14, c1.x + 0.45 * (f2 - 0.45) * wFine);
     // as it ages, what is left lies along the walls between the holes: threads of every
     // thickness, broken in places, with a finer net in patches; never a regular grid
-    vec2 c2 = waterCells(q * 4.1 + bend * 1.7 + 57.0);
+    vec2 c2 = waterCells(qs * 4.1 + bend * 1.7 + 57.0);
     float wv = waterNoise(q * 1.3 + 3.0);
     float w1 = 1.0 - smoothstep(0.02 + 0.3 * d, 0.08 + 0.36 * d, (c1.y - c1.x) / (0.6 + 0.8 * wv));
     float w2 = 1.0 - smoothstep(0.02 + 0.2 * d, 0.07 + 0.25 * d, c2.y - c2.x);

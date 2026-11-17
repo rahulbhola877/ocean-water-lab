@@ -44,7 +44,7 @@ await run('rogueBoat', vesselRun, { scene: 'hurricane', vessel: 'speedboat', sec
 // turned over by hand: it stays over and floods; R rights it
 await run('inverted', () => {
   const L = window.OceanLab;
-  L.scene('tropical'); L.resetBodies(); L.set('wind', 3); L.state.rogue = 0; L.set('vessel', 'speedboat'); L.state.autopilot = false;
+  L.scene('tropical'); L.resetBodies(); L.set('wind', 3); L.state.rogue = 0; L.rogue.on = false; L.rogue.h = 0; L.set('vessel', 'speedboat'); L.state.autopilot = false;   // and no rogue left over from the run before
   L.step(120, 1 / 60);
   const b = L.boat.body; b.q = [1, 0, 0, 0]; b.w = [0, 0, 0];
   L.step(600, 1 / 60);

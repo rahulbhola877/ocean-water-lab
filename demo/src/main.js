@@ -709,7 +709,7 @@
   function buoyancy(b, n, t) {
     var cfg = b.cfg, rho = state.density, wet = 0, G = Kit.G, dk = state.drag, hd = cfg.hDrag === undefined ? 1 : cfg.hDrag;
     var r = cfg.pointRadius, topWet = 0, hit = 0, linH = cfg.linearDragH === undefined ? cfg.linearDrag : cfg.linearDragH;
-    var upY = 1 - 2 * (b.q[0] * b.q[0] + b.q[2] * b.q[2]), lift = 1 - 0.6 * b.flood * smoothstep(-0.2, 0.3, upY);
+    var upY = 1 - 2 * (b.q[0] * b.q[0] + b.q[2] * b.q[2]), lift = 1 - 0.4 * b.flood * smoothstep(-0.2, 0.3, upY);
     var air = 0.5 * 1.225 * (cfg.airDrag || 1) * (cfg.windArea || Math.pow(n * cfg.pointVolume, 2 / 3)) / n;
     var adapt = fft ? 2e-5 : 0, near = 2 * r + 0.5, roller = Math.min(0.12 * sea.hs + 0.3, 2.5);
     windAt(b.pos[0], b.pos[2], wnd);
@@ -900,8 +900,8 @@
     var upY = 1 - 2 * (b.q[0] * b.q[0] + b.q[2] * b.q[2]);
     b.tilt = Math.acos(clamp(upY, -1, 1));
     var rate = b.def.flood || 0;
-    if (rate) {
-      var drain = upY > 0.5 && b.topWet < 0.05 ? 0.06 : 0;
+    if (rate) {                                                        // her cockpit bails itself and the pump runs while she is upright,
+      var drain = upY > 0.3 ? 0.35 * b.flood + (upY > 0.5 && b.topWet < 0.05 ? 0.06 : 0) : 0;   // so in a storm she settles awash instead of sinking
       b.flood = clamp(b.flood + (rate * b.topWet * (1 - b.flood) - drain) * dt, 0, 1);
     }
     if (b.righting > 0) {
@@ -2505,7 +2505,7 @@
   // what changed in 1.5: physics and storms (the "What's new" film)
   var TOUR_NEW = [
     { scene: 'hurricane', dur: 5, title: ['OCEAN WATER LAB 1.5', 'Physics and storms, rebuilt'], cam: { from: [60, -60, 2.5, 0.08, 46], to: [60, -60, 2.8, 0.12, 38] } },
-    { scene: 'hurricane', dur: 9, caption: ['Breaking crests', 'Their roller throws the speedboat about, and a rogue wave can roll her over'], rogue: 0.72, cam: { follow: true, yaw: [0.9, 1.6], dist: [27, 21], pitch: 0.3 } },
+    { scene: 'hurricane', dur: 9, caption: ['Breaking crests', 'Their roller throws the speedboat about, and a rogue wave can roll her over'], rogue: 0.72, cam: { follow: true, yaw: [0.9, 1.6], dist: [28, 22], pitch: 0.55 } },   // high enough to see over the crests
     { scene: 'hurricane', dur: 7.5, caption: ['Capsize and righting', 'Turned over, she floods and stays over until you press R (or her crew rights her)'], capsize: 0.4, right: 4.2, cam: { follow: true, yaw: [1.7, 2.3], dist: [17, 14], pitch: 0.42 } },
     { scene: 'hurricane', dur: 7, caption: ['Lightning that lights the storm', 'Clouds glow around the strike and the sea catches it: no white-out, no wet lens'], strikes: [1.1, 3.6, 5.5], cam: { from: [60, -60, 2.9, 0.1, 40], to: [60, -60, 3.15, 0.14, 33] } },
     { scene: 'storm', dur: 9, caption: ['Storm sea', 'Teal light through the crests, foam lace and wind streaks; the ship reefs in a blow'], cam: { follow: true, yaw: [2.4, 1.5], dist: [46, 34], pitch: 0.1 } },
