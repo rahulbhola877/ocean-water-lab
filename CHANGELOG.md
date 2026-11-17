@@ -13,12 +13,14 @@ Physics: the gaps in storms, under water and at the shore, closed in both engine
   - **Flooding, capsizing, righting** (lab): open hulls take green water over the deck edge and float lower; a boat past 90° for 1.5 s capsizes and stays over (a hull turned over traps air). Press **R** to right her, or the autopilot's crew does after 5 s.
   - **Collisions** (lab): bodies collide as boxes with impulses at the contact point, so a knock can spin or tip them.
   - **Ships:** roll and pitch damping only in the water, and lighter, so a ship heels and rolls in a storm; on autopilot she reefs in a blow. The speedboat's keel and planing lift only work the right way up.
+  - **Storm scenes carry a vessel:** Hurricane brings the speedboat (with rogue waves, so you can watch her capsize and be righted) and Pirate Storm the ship.
   - The C++ port matches the JavaScript to 7e-13 including the new terms; `tools/physics.mjs` checks the outcomes in the running lab.
 - **Water Lite 2.3**
   - **3D rigid bodies:** crates, barrels, buoys and the sailing boat are point-sampled rigid bodies on the Gerstner water, with its velocity and acceleration, depth fade, breaking crests, wind, the seabed and box collisions. Floaters ride slack moorings. The boat sails her circle on an autopilot with engine, keel, rudder and a sail that heels her (she eases the sheet when she heels far).
   - **Side view:** horizontal orbital flow fading with depth, plus the flow feeding the ripples; breaking crests (faces steeper than about 22°); wind on hulls and the boat's sail, which drags when it is under water (so a boat turned over stays turtled); flooding; the seabed under each hull corner with friction, so sunk things lie flat.
   - **Top view:** the wind and current set the boat and floaters drifting, and ripples shove the boat.
-  - **API:** `capsize` and `righted` events, `rightBoat()`, options `autoRight`, `current`, `currentDir`.
+  - **API:** `capsize` and `righted` events, `rightBoat()`, options `autoRight`, `current`, `currentDir`, and `water.cam.follow` for a 3D camera that glides after the boat (the demo's **Follow boat**, on from the start on a tall phone screen).
+  - Crates and barrels carry their weight low, so they float the right way up (a uniform cube floats corner-up).
 
 ## 1.4.0
 

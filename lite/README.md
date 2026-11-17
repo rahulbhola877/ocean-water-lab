@@ -223,6 +223,8 @@ Constructor only: `transparent` (default false) gives the canvas an alpha channe
 
 Other methods: `resize()`, `config()` (current options as JSON), `clearFloaters()`, `drop(x, y)` (the demo's click), `lightning(strength, x)`, `rightBoat(boat)` (rights the 3D boat, or the side view's boat or the one you pass), `benchmark(frames)`, `on(type, fn)`, `off(type, fn)`, `dispose()`.
 
+In 3D, `water.cam.follow = water.boat` makes the camera glide after the boat (or anything with `x` and `z`); set it to null to stop. The demo's **Follow boat** does this, and starts on by default on a tall phone screen, where the boat's circle runs out of the frame.
+
 In 3D, `water.boat` and each floater are rigid bodies: `x`, `y`, `z` (centre of mass), `vel`, `q` (orientation quaternion `[x, y, z, w]`), `w` (spin), plus `heading`, `wet` (how much is under water), `flood` and `capsized` on the boat.
 
 ## How it stays cheap

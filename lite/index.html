@@ -142,6 +142,7 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
       <button type="button" data-toggle="scenery">Scenery</button>
       <button type="button" data-toggle="reflections">Reflections</button>
       <button type="button" data-toggle="boat">Boat</button>
+      <button type="button" id="follow3d" aria-pressed="false">Follow boat</button>
       <button type="button" data-toggle="floaters">Floating things</button>
       <button type="button" id="new-map">New map</button>
       <button type="button" id="sound" aria-pressed="false">Sound</button>
@@ -208,6 +209,9 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     $('big').setAttribute('aria-pressed', String(o.mode === 'top' ? o.mapSize[0] > 160 : o.worldWidth > 480));
     $('cam-note').textContent = CAM_NOTES[o.mode] || '';
     if (o.mode === 'top') water.camera2d.follow = water.boat;
+    water.cam.follow = o.mode === '3d' && follow3d ? water.boat : null;       // the 3D boat is rebuilt with the scene: follow the new one
+    $('follow3d').style.display = o.mode === '3d' && o.boat ? '' : 'none';
+    $('follow3d').setAttribute('aria-pressed', String(follow3d));
     document.querySelectorAll('[data-toggle]').forEach(function (b) { b.setAttribute('aria-pressed', String(!!o[b.dataset.toggle])); });
     $('new-map').style.display = o.mode === 'top' ? '' : 'none';
     SLIDERS.forEach(function (k) { var el = $(k); if (document.activeElement !== el) el.value = o[k]; $('o-' + k).textContent = FMT[k](+o[k]); });
@@ -254,6 +258,15 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
   document.querySelectorAll('[data-color]').forEach(function (inp) {
     inp.oninput = function () { var c = Object.assign({}, water.opts.colors || {}); c[inp.dataset.color] = inp.value; water.setOptions({ colors: c }); sync(); };
   });
+  // on a tall phone screen the boat's circle runs out of the frame, so the camera follows her from the start
+  var follow3d = (canvas.clientHeight || 1) > (canvas.clientWidth || 1);
+  if (follow3d) water.cam.dist = 26;
+  $('follow3d').onclick = function () {
+    follow3d = !follow3d;
+    water.cam.dist = follow3d ? 26 : 34;
+    if (!follow3d) water.cam.target = [0, 0, -5];
+    sync();
+  };
   document.querySelectorAll('[data-toggle]').forEach(function (b) { b.onclick = function () { var o = {}; o[b.dataset.toggle] = !water.opts[b.dataset.toggle]; water.setOptions(o); sync(); }; });
   $('new-map').onclick = function () { water.setOptions({ seed: water.opts.seed + 1 }); sync(); };
   $('reset-colors').onclick = function () { water.setOptions({ colors: null }); sync(); };

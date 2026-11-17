@@ -1508,6 +1508,10 @@
     this.trail.forEach(function (t) { t.life -= dt * 0.36; });
     var cam = this.cam;
     if (cam.auto) { cam.autoT = (cam.autoT || 0) + dt; cam.yaw = 1.32 + 0.38 * Math.sin(cam.autoT * 0.07); }
+    if (cam.follow && cam.follow.x !== undefined) {                  // water.cam.follow = water.boat (or anything with x, z)
+      var kf = 1 - Math.exp(-dt * 1.5);
+      cam.target[0] += (cam.follow.x - cam.target[0]) * kf; cam.target[2] += (cam.follow.z - cam.target[2]) * kf;
+    }
   };
   // one physics step for every body in the 3D view
   WaterLite.prototype._physics3d = function (h, t) {
@@ -1970,7 +1974,8 @@
     } else {
       var kind = this.meshes[def.kind] ? def.kind : 'crate';
       var size = def.size ? [def.size, def.size, def.size] : kind === 'buoy' ? [0.8, 1.6, 0.8] : kind === 'barrel' ? [0.7, 1.0, 0.7] : [1.1, 1.1, 1.1];
-      f = makeBody3d(kind, size, kind === 'buoy' ? [2, 4, 2] : [3, 3, 3], def.density || 0.5, kind === 'buoy' ? [0, -size[1] * 0.22, 0] : [0, 0, 0]);
+      // the weight sits low (a buoy's ballast, the cargo in a crate or barrel), so each floats the right way up
+      f = makeBody3d(kind, size, kind === 'buoy' ? [2, 4, 2] : [3, 3, 3], def.density || 0.5, [0, -size[1] * (kind === 'crate' ? 0.18 : 0.24), 0]);
       f.x = x; f.z = y; f.hx = x; f.hz = y; f.y = def.y || 0; f.density = def.density || 0.5;
       f.q = qAxis(0, 1, 0, def.angle === undefined ? Math.random() * 6 : def.angle);
     }

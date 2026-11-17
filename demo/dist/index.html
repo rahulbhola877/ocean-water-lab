@@ -1558,7 +1558,7 @@ window.WATER_SHADERS = {"foam_sim.frag":"#ifndef WATER_FOAM_DEPTH\n#define WATER
            cloudDensity: 1.8, cloudSpeed: 3.5, haze: 3, fog: 2.4, rain: 1, rainSize: 1.1, rainSplash: 1.6, rainShafts: 1, lensRain: 0.45,
            gusts: 0.9, gustSize: 140, spindrift: 1.7, lightning: 0.85, rogue: 16, rogueEvery: 45, look: 'emerald', sss: 2.2,
            surf: 3.5, surfPeriod: 13, tide: 1.2, temp: -0.25, sat: 0.65, contrast: 1.25, vignette: 0.7, ev: -0.5, grain: 0.2,
-           split: 0.35, shadowTint: '#3e5a66', highTint: '#9aa49c', palms: false, boat: false },
+           split: 0.35, shadowTint: '#3e5a66', highTint: '#9aa49c', palms: false, boat: true, vessel: 'speedboat', autopilot: true },
       cam: [60, -60, 2.6, 0.13, 42], boat: [80, -60, 40]
     },
     // gale, huge swell, rain, lightning, green light through the crests (pirate-adventure storm)
@@ -1568,7 +1568,7 @@ window.WATER_SHADERS = {"foam_sim.frag":"#ifndef WATER_FOAM_DEPTH\n#define WATER
            foamLife: 5, streaks: 0.7, sunElev: 18, sunAz: 120, clouds: 0.97, cloudType: 1.0, cloudBase: 600, cloudTop: 6000,
            cloudDensity: 1.4, cloudSpeed: 2.5, haze: 1.5, fog: 3, rain: 0.85, lightning: 0.55, look: 'emerald', sss: 2.6,
            surf: 2.4, surfPeriod: 12, temp: -0.22, sat: 0.72, contrast: 1.2, vignette: 0.6, ev: -0.7, grain: 0.15, split: 0.3, shadowTint: '#4a6a78', highTint: '#9aa8a0',
-           palms: false, boat: false },
+           palms: false, boat: true, vessel: 'ship', autopilot: true },
       cam: [60, -60, 3.0, 0.06, 34], boat: [80, -60, 40]
     },
     // deep clear navy water, scattered fair-weather cumulus (open-sea adventure)
