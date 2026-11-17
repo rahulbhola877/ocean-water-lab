@@ -909,7 +909,7 @@
       qSlerp(b.rightFrom, b.rightTo, smoothstep(0, 1.6, b.righting), b.q);
       b.w[0] = b.w[1] = b.w[2] = 0; b.vel[1] *= Math.exp(-dt * 3);
       b.flood = Math.max(0, b.flood - dt * 0.7);
-      if (b.righting >= 1.6) { b.righting = 0; b.capT = 0; b.capsized = false; }
+      if (b.righting >= 1.6) { b.righting = 0; b.capT = 0; b.capsized = false; if (b === boat.body && /capsized/.test($('note').textContent)) $('note').textContent = ''; }
       return;
     }
     if (!b.isBoat) return;                                             // a crate has no right way up
@@ -2502,6 +2502,19 @@
     { scene: 'night', dur: 9, caption: ['Moonlit', 'Bioluminescent wake'], cam: { follow: true, yaw: [0.4, -0.5], dist: [14, 19], pitch: 0.12 } },
     { scene: 'golden', dur: 7, title: ['OPEN SOURCE', 'github.com/rahulbhola877/ocean-water-lab'], end: true, cam: { from: [-40, 15, 0.2, 0.05, 34], to: [-40, 15, 0.42, 0.14, 48] } }
   ];
+  // what changed in 1.5: physics and storms (the "What's new" film)
+  var TOUR_NEW = [
+    { scene: 'hurricane', dur: 5, title: ['OCEAN WATER LAB 1.5', 'Physics and storms, rebuilt'], cam: { from: [60, -60, 2.5, 0.08, 46], to: [60, -60, 2.8, 0.12, 38] } },
+    { scene: 'hurricane', dur: 9, caption: ['Breaking crests', 'Their roller throws the speedboat about, and a rogue wave can roll her over'], rogue: 0.72, cam: { follow: true, yaw: [0.9, 1.6], dist: [27, 21], pitch: 0.3 } },
+    { scene: 'hurricane', dur: 7.5, caption: ['Capsize and righting', 'Turned over, she floods and stays over until you press R (or her crew rights her)'], capsize: 0.4, right: 4.2, cam: { follow: true, yaw: [1.7, 2.3], dist: [17, 14], pitch: 0.42 } },
+    { scene: 'hurricane', dur: 7, caption: ['Lightning that lights the storm', 'Clouds glow around the strike and the sea catches it: no white-out, no wet lens'], strikes: [1.1, 3.6, 5.5], cam: { from: [60, -60, 2.9, 0.1, 40], to: [60, -60, 3.15, 0.14, 33] } },
+    { scene: 'storm', dur: 9, caption: ['Storm sea', 'Teal light through the crests, foam lace and wind streaks; the ship reefs in a blow'], cam: { follow: true, yaw: [2.4, 1.5], dist: [46, 34], pitch: 0.1 } },
+    { scene: 'tropical', dur: 7, caption: ['Wind drift and currents', 'Flotsam drifts downwind, and a current carries everything with it'], current: 1.6, reset: true, cam: { from: [-1, 1, 1.15, 0.62, 19], to: [2, 4, 1.4, 0.55, 17] } },
+    { scene: 'golden', dur: 5, title: ['OPEN SOURCE', 'github.com/rahulbhola877/ocean-water-lab'], end: true, cam: { from: [-40, 15, 0.2, 0.05, 34], to: [-40, 15, 0.42, 0.14, 48] } }
+  ];
+  var TOUR_REEL = TOUR, tourName = 'reel';
+  function useTour(name) { tourName = name === 'new' ? 'new' : 'reel'; TOUR = tourName === 'new' ? TOUR_NEW : TOUR_REEL; }
+  if (/[#&]whatsnew\b/.test(location.hash)) useTour('new');
   var tour = { on: false, i: -1, t: 0, fade: 0, caption: null, fired: {}, onEnd: null };
   function startTour(onEnd) {
     tour.on = true; tour.i = -1; tour.t = 0; tour.onEnd = onEnd || null;
@@ -2519,16 +2532,22 @@
     if (tour.i >= TOUR.length) { stopTour(); return; }
     var s = TOUR[tour.i];
     applyScene(s.scene);
-    state.autopilot = true; state.follow = false;
-    if (s.rogue) {
-      spawnRogue();
-      var w = Math.sqrt(9.81 * rogue.k), cg = w / (2 * rogue.k);
-      rogue.t0 -= Math.max(0, (650 - cg * s.dur * s.rogue) / cg);
-    }
+    state.autopilot = true; state.follow = false; state.current = s.current || 0;
+    if (s.reset) resetBodies();
     if (s.cam.follow && boat.body) {                                   // start the chase already behind the vessel at speed
       qRotate(boat.body.q, [1, 0, 0], bf);
       var sp = boat.body.isShip ? 4 : 12;
       boat.body.vel[0] = bf[0] * sp; boat.body.vel[2] = bf[2] * sp; boat.throttle = boat.body.isShip ? 1 : 0.85;
+    }
+    if (s.rogue) {
+      placeTourCamera(0, true);
+      spawnRogue();
+      var w = Math.sqrt(9.81 * rogue.k), cg = w / (2 * rogue.k), lead = s.dur * s.rogue;
+      if (s.cam.follow && boat.body) {                                 // aim it where the vessel will be when it arrives
+        rogue.tx = boat.body.pos[0] + boat.body.vel[0] * lead; rogue.tz = boat.body.pos[2] + boat.body.vel[2] * lead;
+        rogue.x0 = rogue.tx - rogue.dx * 650; rogue.z0 = rogue.tz - rogue.dz * 650;
+      }
+      rogue.t0 -= Math.max(0, (650 - cg * lead) / cg);
     }
     tour.caption = s.title ? { big: true, a: s.title[0], b: s.title[1] } : { big: false, a: s.caption[0], b: s.caption[1] };
     var cap = $('tour-caption');
@@ -2560,6 +2579,11 @@
     lastInput = performance.now();
     tour.fade = Math.max(smoothstep(0.7, 0, tour.t), smoothstep(s.dur - 0.7, s.dur, tour.t)) * (tour.i === 0 && tour.t < 0.7 ? 1 : 1);
     (s.fire || []).forEach(function (at, j) { if (tour.t > at && !tour.fired['f' + j]) { tour.fired['f' + j] = true; fireCannons(j % 2 ? 1 : -1); } });
+    if (s.capsize !== undefined && tour.t > s.capsize && !tour.fired.cap && boat.body) {         // roll her over, keeping her heading
+      tour.fired.cap = true;
+      var q0 = boat.body.q; boat.body.q = [q0[3], q0[2], -q0[1], -q0[0]]; boat.body.w = [0, 0, 0];
+    }
+    if (s.right !== undefined && tour.t > s.right && !tour.fired.right && boat.body) { tour.fired.right = true; rightBody(boat.body); }
     (s.strikes || []).forEach(function (at, j) {
       if (tour.t > at && !tour.fired['s' + j]) { tour.fired['s' + j] = true; flash.timer = 0; flash.aim = Math.atan2(cam.fwd[2], cam.fwd[0]) + (Math.random() - 0.5) * 0.5; }
     });
@@ -2815,6 +2839,7 @@
     document.querySelectorAll('[data-scene]').forEach(function (b) { b.setAttribute('aria-pressed', state.scene === b.getAttribute('data-scene') ? 'true' : 'false'); });
     var dh = $('drive-hint'); if (dh) dh.hidden = !(state.boat && state.follow && !state.autopilot);
     $('tour-play').textContent = tour.on && !rec.on ? 'Stop tour' : 'Play tour';
+    $('tour-which').setAttribute('aria-pressed', tourName === 'new' ? 'true' : 'false');
     $('tour-play').setAttribute('aria-pressed', tour.on && !rec.on ? 'true' : 'false');
     $('tour-rec').textContent = rec.on && tour.on ? 'Stop recording' : 'Record tour';
     $('tour-rec').setAttribute('aria-pressed', rec.on && tour.on ? 'true' : 'false');
@@ -3018,6 +3043,7 @@
     });
     $('reset').addEventListener('click', function () { resetBodies(); });
     $('tour-play').addEventListener('click', function () { if (tour.on) stopTour(); else startTour(); syncUI(); });
+    $('tour-which').addEventListener('click', function () { if (!tour.on && !film.on) { useTour(tourName === 'new' ? 'reel' : 'new'); syncUI(); } });
     $('tour-rec').addEventListener('click', function () {
       if (rec.on) { stopTour(); stopRecording(); return; }
       if (!audio.on && state.sound !== false) { startAudio(); state.sound = true; }
@@ -3221,7 +3247,7 @@
         // n simulated steps; the last few are drawn (so temporal accumulation settles). readPixels makes the call wait for the GPU.
         frames: function (n, dt) {
           var px = new Uint8Array(4);
-          for (var i = 0; i < n; i++) { simulate(dt); prepare(dt); if (i >= n - Math.min(n, 8)) draw(); if (i % 4 === 3 || i === n - 1) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+          for (var i = 0; i < n; i++) { stepTour(dt); simulate(dt); prepare(dt); if (i >= n - Math.min(n, 8)) draw(); if (i % 4 === 3 || i === n - 1) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
           return rt.w + 'x' + rt.h;
         },
         // GPU vs CPU: displace rest points with the shader, then ask the CPU sampler for the

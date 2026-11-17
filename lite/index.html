@@ -374,6 +374,196 @@ textarea { width: 100%; height: 150px; font: 11px/1.4 var(--mono); border: 1px s
     }
     requestAnimationFrame(tick);
   }
+
+  // ---- live demo: window.waterTour() plays a scripted walk through the controls, with a pointer
+  //      that really clicks them, and captions (it is how the demo video was recorded) ----------
+  var tourCss = '#tw-cur{position:fixed;left:0;top:0;width:26px;height:26px;z-index:60;pointer-events:none;transform:translate(-40px,-40px);filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}' +
+    '#tw-ring{position:fixed;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid #fff;border-radius:50%;z-index:59;pointer-events:none;opacity:0}' +
+    '#tw-cap{position:fixed;bottom:52px;z-index:58;pointer-events:none;padding:11px 18px 12px;border-radius:10px;background:rgba(8,16,28,.82);color:#fff;' +
+    'transition:opacity .35s,transform .35s;opacity:0;transform:translateY(8px);max-width:620px;box-shadow:0 8px 24px rgba(0,0,0,.3)}' +
+    '#tw-cap b{display:block;font:700 19px/1.25 var(--sans);letter-spacing:.01em}#tw-cap span{display:block;font:500 13.5px/1.4 var(--sans);color:#c9d6e4;margin-top:3px}' +
+    '#tw-cap.on{opacity:1;transform:none}' +
+    '#tw-title{position:fixed;top:0;bottom:0;right:0;z-index:57;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;' +
+    'background:radial-gradient(ellipse at center,rgba(6,14,26,.62),rgba(6,14,26,.2) 70%);color:#fff;text-align:center;transition:opacity .6s;opacity:0}' +
+    '#tw-title.on{opacity:1}#tw-title b{font:800 54px/1 var(--sans);letter-spacing:.01em;text-shadow:0 3px 18px rgba(0,0,0,.5)}' +
+    '#tw-title span{font:500 18px/1.4 var(--sans);color:#dce8f4;max-width:560px;text-shadow:0 2px 10px rgba(0,0,0,.6)}' +
+    '#tw-title i{font:600 13px var(--mono);font-style:normal;color:#9fc2e8;letter-spacing:.06em}' +
+    '#tw-slate{position:fixed;inset:0;z-index:70;background:#000;pointer-events:none;transition:opacity .45s;opacity:0}' +
+    'body.touring .hint{display:none}';
+  var tw = null;
+  function tourUI() {
+    if (tw) return tw;
+    var st = document.createElement('style'); st.textContent = tourCss; document.head.appendChild(st);
+    var mk = function (tag, id, html) { var e = document.createElement(tag); e.id = id; if (html) e.innerHTML = html; document.body.appendChild(e); return e; };
+    tw = {
+      cur: mk('div', 'tw-cur', '<svg viewBox="0 0 26 26" width="26" height="26"><path d="M3 2 L3 21 L8.2 16.4 L11.7 24 L15 22.5 L11.6 15.1 L18.5 15 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>'),
+      ring: mk('div', 'tw-ring'), cap: mk('div', 'tw-cap', '<b></b><span></span>'), title: mk('div', 'tw-title', '<b></b><span></span><i></i>'), slate: mk('div', 'tw-slate'),
+      x: -40, y: -40
+    };
+    return tw;
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function frame() { return new Promise(function (r) { requestAnimationFrame(r); }); }
+  function waterLeft() { return small.matches ? 0 : panel.getBoundingClientRect().right; }
+  function placeOverlays() {                                      // captions and titles sit over the water, not the panel
+    var l = waterLeft(), w = innerWidth - l;
+    tw.cap.style.left = (l + w / 2) + 'px'; tw.cap.style.transform = tw.cap.classList.contains('on') ? 'translateX(-50%)' : 'translate(-50%, 8px)';
+    tw.title.style.left = l + 'px';
+  }
+  function caption(a, b) {
+    tw.cap.querySelector('b').textContent = a || ''; tw.cap.querySelector('span').textContent = b || '';
+    tw.cap.classList.toggle('on', !!a); placeOverlays();
+  }
+  function titleCard(a, b, c) {
+    tw.title.querySelector('b').textContent = a || ''; tw.title.querySelector('span').textContent = b || ''; tw.title.querySelector('i').textContent = c || '';
+    tw.title.classList.toggle('on', !!a); placeOverlays();
+  }
+  async function moveTo(x, y, ms) {
+    ms = ms === undefined ? 520 : ms;
+    var x0 = tw.x, y0 = tw.y, t0 = performance.now();
+    while (true) {
+      var f = Math.min((performance.now() - t0) / Math.max(ms, 1), 1), e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;
+      tw.x = x0 + (x - x0) * e; tw.y = y0 + (y - y0) * e;
+      tw.cur.style.transform = 'translate(' + (tw.x - 3) + 'px,' + (tw.y - 2) + 'px)';
+      if (f >= 1) break;
+      await frame();
+    }
+  }
+  function ripple() {
+    var r = tw.ring;
+    r.style.transition = 'none'; r.style.left = tw.x + 'px'; r.style.top = tw.y + 'px'; r.style.opacity = '0.95'; r.style.transform = 'scale(0.35)';
+    void r.offsetWidth;
+    r.style.transition = 'transform .45s ease-out, opacity .45s ease-out'; r.style.transform = 'scale(1.25)'; r.style.opacity = '0';
+  }
+  async function reveal(el) {                                     // scroll the settings panel until the control is in view
+    if (!panel.contains(el)) return;
+    var pr = panel.getBoundingClientRect(), er = el.getBoundingClientRect();
+    if (er.top >= pr.top + 30 && er.bottom <= pr.bottom - 30) return;
+    var target = panel.scrollTop + (er.top - pr.top) - pr.height * 0.32, from = panel.scrollTop, t0 = performance.now();
+    while (true) {
+      var f = Math.min((performance.now() - t0) / 420, 1), e = 1 - Math.pow(1 - f, 3);
+      panel.scrollTop = from + (target - from) * e;
+      if (f >= 1) break;
+      await frame();
+    }
+  }
+  async function press(sel, after) {
+    var el = typeof sel === 'string' ? document.querySelector(sel) : sel;
+    await reveal(el);
+    var r = el.getBoundingClientRect();
+    await moveTo(r.left + r.width / 2, r.top + r.height / 2);
+    ripple(); el.click();
+    await sleep(after === undefined ? 300 : after);
+  }
+  async function slide(id, to, ms) {
+    var el = $(id); await reveal(el);
+    var r = el.getBoundingClientRect(), lo = +el.min, hi = +el.max, from = +el.value;
+    var px = function (v) { return r.left + 8 + (r.width - 16) * (v - lo) / (hi - lo); };
+    await moveTo(px(from), r.top + r.height / 2); ripple();
+    var t0 = performance.now(); ms = ms || 900;
+    while (true) {
+      var f = Math.min((performance.now() - t0) / ms, 1), e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2, v = from + (to - from) * e;
+      el.value = v; el.dispatchEvent(new Event('input'));
+      tw.x = px(+el.value); tw.cur.style.transform = 'translate(' + (tw.x - 3) + 'px,' + (tw.y - 2) + 'px)';
+      if (f >= 1) break;
+      await frame();
+    }
+    await sleep(200);
+  }
+  async function tapWater(fx, fy, after) {                        // fx, fy: fractions of the water area beside the panel
+    var l = waterLeft(), x = l + (innerWidth - l) * fx, y = innerHeight * fy, r = canvas.getBoundingClientRect();
+    await moveTo(x, y, 420); ripple();
+    water.drop(x - r.left, y - r.top);
+    await sleep(after === undefined ? 350 : after);
+  }
+  var touring = false;
+  window.waterTour = async function () {
+    if (touring) return; touring = true;
+    tourUI(); document.body.classList.add('touring');
+    var slate = tw.slate; slate.style.transition = 'none'; slate.style.opacity = '1';
+    // the starting scene, set while the screen is black
+    water.setOptions({ mode: '3d', style: 'realistic', mood: 'day', palette: 'auto', quality: 'high', rain: -1, wind: 7, waveHeight: 1, colors: null,
+      pixelSize: 0, dither: -1, floaters: true, boat: true, scenery: true, reflections: true, seed: 7, current: 0, autoRight: true });
+    if (follow3d) $('follow3d').click();
+    water.cam.auto = true; water.cam.dist = 34; water.cam.target = [0, 0, -5];
+    sync(); panel.scrollTop = 0; setFolded(false);
+    await sleep(1500);
+    slate.style.transition = 'opacity .5s'; slate.style.opacity = '0';
+    titleCard('Water Lite', 'Clear, stylized water for low-end browser games', 'ONE JS FILE · WEBGL 1 · NO DEPENDENCIES');
+    await sleep(3300); titleCard(null);
+    await moveTo(innerWidth * 0.6, innerHeight * 0.5, 0); await sleep(300);
+
+    caption('Six art styles, one engine', 'Realistic, toon, pixel art, low poly, retro 32-bit and ink');
+    var styles = ['toon', 'pixel', 'lowpoly', 'retro', 'ink', 'realistic'];
+    for (var i = 0; i < styles.length; i++) await press('[data-style="' + styles[i] + '"]', i === styles.length - 1 ? 600 : 1050);
+
+    caption('Time and weather', 'Day, sunset, night and storm, with rain, lightning and thunder');
+    await press('[data-mood="sunset"]', 1500);
+    await press('[data-mood="night"]', 1500);
+    await press('[data-mood="storm"]', 500);
+    await slide('rain', 0.9, 800);
+    water.lightning(1, 0.62); await sleep(1300); water.lightning(0.8, 0.3); await sleep(900);
+
+    caption('Things really float', 'Crates, buoys and a sailing boat are rigid bodies: they roll, drift and heel in a storm');
+    await press('#follow3d', 0);
+    water.cam.dist = 13; water.cam.pitch = 0.28; water.cam.auto = false;          // close in on the boat
+    await sleep(3200);
+    caption('Capsized? She comes back', 'A boat turned over fires a capsize event, and autoRight or rightBoat() rights her');
+    var b = water.boat;
+    if (b) { b.q = [1, 0, 0, 0]; b.w = [0, 0, 0]; }
+    await sleep(2600); water.rightBoat(); await sleep(2300);
+    await press('#follow3d', 200);
+    water.cam.auto = true; water.cam.pitch = 0.32;
+    await slide('rain', 0, 500);
+    await press('[data-mood="day"]', 300);
+
+    caption('Side view, for platformers', 'Click the water to drop things in: splashes, ripples, floating and sinking');
+    await press('[data-mode="side"]', 700);
+    await tapWater(0.32, 0.22, 500); await tapWater(0.55, 0.18, 500); await tapWater(0.74, 0.25, 900);
+    caption('Wind sets them drifting', 'Leeway at a few percent of the wind, and an optional current');
+    await slide('wind', 16, 900); await sleep(1600);
+    await slide('wind', 7, 500);
+
+    caption('Palettes', 'Pixel art with PICO-8, Game Boy or 1-bit colours, for your game\'s own look');
+    await press('[data-style="pixel"]', 900);
+    await press('[data-palette="gameboy"]', 1100);
+    await press('[data-palette="pico8"]', 1100);
+    await press('[data-palette="mono"]', 1100);
+    await press('[data-palette="auto"]', 400);
+
+    caption('Top down, for RPGs and racers', 'Steer the boat with WASD: it leaves a wake and shoves things aside');
+    await press('[data-mode="top"]', 300);
+    await press('[data-style="toon"]', 300);
+    await moveTo(innerWidth * 0.66, innerHeight * 0.55, 400);
+    water.input.up = true; await sleep(1200); water.input.right = true; await sleep(1500); water.input.right = false; water.input.left = true; await sleep(1100);
+    water.input.left = false; await sleep(700); water.input.up = false;
+    caption('Big worlds', 'The camera follows the boat across a larger map');
+    await press('#big', 2200);
+    await press('#big', 300);
+
+    caption('Built for low-end devices', 'From Potato to High, or Auto, which adapts the resolution to keep frames smooth');
+    await press('[data-quality="potato"]', 1300);
+    await press('[data-quality="high"]', 900);
+    await press('[data-quality="auto"]', 600);
+
+    caption('Drop it into your game', 'Every setting becomes code: one file, water.update(dt) and water.render()');
+    await press('#copy', 1800);
+
+    caption(null);
+    await press('[data-mode="3d"]', 0);
+    await press('[data-style="realistic"]', 0);
+    water.setOptions({ mood: 'sunset' }); sync(); panel.scrollTop = 0;
+    await moveTo(innerWidth + 40, innerHeight * 0.7, 500);
+    titleCard('Water Lite 2.3', 'Open source, with the full Ocean Water Lab beside it', 'GITHUB.COM/RAHULBHOLA877/OCEAN-WATER-LAB');
+    await sleep(3800);
+    slate.style.transition = 'opacity .6s'; slate.style.opacity = '1';
+    await sleep(1400);
+    titleCard(null); document.body.classList.remove('touring'); touring = false;
+    setTimeout(function () { slate.style.opacity = '0'; }, 1500);
+    return 'done';
+  };
+  if (/[#&]tour\b/.test(location.hash)) setTimeout(window.waterTour, 1200);
+
   sync();
   requestAnimationFrame(tick);
 })();
