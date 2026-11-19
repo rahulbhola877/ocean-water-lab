@@ -615,11 +615,13 @@
     else waves.sample(x, z, minWavelength, depthAt(x, z), wDeep);
     var su = state.surf > 0.001 && surfSample(x, z, t, wSurf), ro = rogue.h > 0.01 && rogueSample(x, z, wRog);
     var h = wDeep.height + (su ? wSurf.height : 0) + (ro ? wRog.height : 0);
+    if (domes.length) h += domeAt(x, z, t === undefined ? simTime : t, domeTmp)[0];   // the heave over an underwater blast
     var d = Math.max(h - y, 0), f = Math.exp(-TAU * d / Math.max(sea.lp, 1)), cd = state.currentDir * DEG;
     out.height = h; out.depth = d;
     out.vx = 0; out.vy = 0; out.vz = 0; out.ax = 0; out.ay = 0; out.az = 0;
     addMotion(out, wDeep, f);
     out.vx += Math.cos(cd) * state.current; out.vz += Math.sin(cd) * state.current;
+    if (domes.length) out.vy += domeTmp[1];
     out.ay0 = wDeep.ay; out.sx = wDeep.vx; out.sz = wDeep.vz; out.bore = 0;
     if (su) {
       var fv = clamp(1 - d / Math.max(wSurf.bed + wSurf.height, 0.1), 0, 1);
@@ -2158,7 +2160,7 @@
     pebble: { mass: 0.025, radius: 0.013, scale: [0.034, 0.022, 0.028], tint: [0.46, 0.43, 0.39] },
     stone: { mass: 0.6, radius: 0.038, scale: [0.11, 0.07, 0.09], tint: [0.34, 0.33, 0.31] },
     skimmer: { mass: 0.1, radius: 0.023, disc: 0.04, attack: 0.35, scale: [0.085, 0.018, 0.075], tint: [0.30, 0.31, 0.30] },
-    grenade: { mass: 0.4, radius: 0.032, scale: [0.064, 0.092, 0.064], tint: [0.20, 0.25, 0.12], fuse: 3.2, charge: 0.2 }
+    grenade: { mass: 0.4, radius: 0.032, scale: [0.064, 0.092, 0.064], tint: [0.20, 0.25, 0.12], fuse: 2.6, charge: 0.2 }
   };
   var throws = [], fx = [], rippleFocus = { x: 0, z: 0, until: -1 }, thrown = { splashes: 0, skips: 0, blasts: 0, last: null };
   function later(t, fn) { fx.push({ at: simTime + t, fn: fn }); }
@@ -2202,6 +2204,7 @@
   }
   function stepThrows(dt) {
     for (var e = fx.length - 1; e >= 0; e--) if (fx[e].at <= simTime) { var job = fx[e]; fx.splice(e, 1); job.fn(); }
+    stepDomes(dt);
     for (var i = throws.length - 1; i >= 0; i--) {
       var th = throws[i], d = th.def, p = th.p, v = th.v;
       th.t += dt;
@@ -2278,14 +2281,14 @@
     for (var k = 0; k < n; k++) {
       var a = Math.random() * TAU, out = 0.4 + Math.random() * 1.2;
       emitSpray(x + Math.cos(a) * sp.crownRadius * 0.7, surf + 0.02, z + Math.sin(a) * sp.crownRadius * 0.7,
-        Math.cos(a) * out, crownV * (0.55 + 0.6 * Math.random()), Math.sin(a) * out, sz * (0.6 + Math.random() * 0.8), 0.35 + Math.random() * 0.35, 0.8);
+        Math.cos(a) * out, crownV * (0.55 + 0.6 * Math.random()), Math.sin(a) * out, sz * (0.6 + Math.random() * 0.8), 0.35 + Math.random() * 0.35, 0.8, 0.2);
     }
     // the cavity closes and throws up the Worthington jet
     later(sp.collapseTime * 0.85, function () {
       var m = Math.round(clamp(sp.droplets * 0.35, 3, 40) * Math.max(state.spray, 0.3));
       for (var j = 0; j < m; j++) {
         var f = j === 0 ? 1.05 : 0.6 + Math.random() * 0.4, aa = Math.random() * TAU, side = Math.random() * 0.25;
-        emitSpray(x, surf + 0.02, z, Math.cos(aa) * side, jetV * f, Math.sin(aa) * side, sz * (j === 0 ? 1.6 : 0.9), 0.45 + Math.random() * 0.3, 0.85);
+        emitSpray(x, surf + 0.02, z, Math.cos(aa) * side, jetV * f, Math.sin(aa) * side, sz * (j === 0 ? 1.6 : 0.9), 0.45 + Math.random() * 0.3, 0.85, 0.2);
       }
     });
     // the plop: the bubble left behind rings, rising in pitch as it shrinks
@@ -2293,11 +2296,40 @@
     oneShot('tone', 'sine', f0 * 0.8, g, 0.004, 0.09 + 0.02 / Math.sqrt(sp.energy + 0.1), dist / 343, f0 * 1.5);
     oneShot('white', 'bandpass', clamp(1200 + 1600 / (1 + sp.energy), 900, 3000), g * 0.6, 0.004, 0.18 + 0.05 * Math.log(1 + sp.energy), dist / 343);
   }
+  // A blast's dome: the water over the charge heaved up, about an eighth of the height its spall
+  // speed alone would throw it (air drag, and the water is not one solid lump), tuned by eye.
+  // It rises in 0.2 s; the ripple simulation lets it fall and run out as waves. Floating bodies
+  // feel it through waterAt(), which uses the same rise and an approximate fall.
+  var domes = [];
+  function domeEnv(age) { return age <= 0 ? 0 : age < 0.2 ? smoothstep(0, 0.2, age) : Math.exp(-(age - 0.2) / 0.45); }
+  function domeAt(x, z, t, o) {
+    o[0] = 0; o[1] = 0;
+    for (var i = 0; i < domes.length; i++) {
+      var d = domes[i], age = t - d.t0;
+      if (age <= 0 || age > 3) continue;
+      var q = ((x - d.x) * (x - d.x) + (z - d.z) * (z - d.z)) / (d.R * d.R);
+      if (q > 9) continue;
+      var g = Math.exp(-q) * d.H;
+      o[0] += g * domeEnv(age); o[1] += g * (domeEnv(age + 0.01) - domeEnv(age)) / 0.01;
+    }
+    return o;
+  }
+  var domeTmp = [0, 0];
+  function stepDomes(dt) {
+    for (var i = domes.length - 1; i >= 0; i--) {
+      var d = domes[i], age = simTime - d.t0;
+      if (age > 3) { domes.splice(i, 1); continue; }
+      if (age > 0 && age - dt < 0.2) addRipple(d.x, d.z, d.R, d.H * (domeEnv(Math.min(age, 0.2)) - domeEnv(Math.max(age - dt, 0))));
+    }
+  }
   function blast(x, depth, z, charge) {
     depth = Math.max(depth, 0.2);
     var bl = Kit.underwaterBlast(charge, depth), surf = surfaceAt(x, z), sp = Math.max(state.spray, 0.35);
-    thrown.blasts++; thrown.last = bl;
+    var v0 = bl.domeSpeed, domeH = clamp(0.125 * v0 * v0 / (2 * 9.81), 0.2, 2.4), domeR = Math.max(1.1 * depth, 1.4 * bl.bubbleRadius, 1.2);
+    thrown.blasts++; thrown.last = bl; bl.domeHeight = domeH; bl.domeR = domeR;
     watchSplash(x, z);
+    domes.push({ x: x, z: z, t0: simTime, H: domeH, R: domeR });
+    if (domes.length > 6) domes.shift();
     // the shock: everything floating nearby is kicked up and away. Its impulse on the hull's
     // underside moves a heavy hull; a light one goes no faster than the water under it is thrown.
     for (var i = 0; i < bodies.length; i++) {
@@ -2307,59 +2339,58 @@
       var dv = Math.min(Jt / b.mass, 0.5 * Kit.spallSpeed(charge, depth, Math.hypot(rx, rz)), 9), k = dv * b.mass / R;
       pushBody(b, [rx * k, ry * k, rz * k], [-rx / R * b.radius * 0.5, -b.radius * 0.4, -rz / R * b.radius * 0.5], 1);
     }
-    // the dome: the surface over the charge torn into spray and thrown up (air drag takes most of it)
-    var nd = Math.round(260 * sp);
+    // the shock reaching the surface tears it into fine spray, thrown up at the spall speed;
+    // drag stops the finest of it within a few metres
+    var nd = Math.round(240 * sp);
     for (var j = 0; j < nd; j++) {
-      var r = bl.domeRadius * 0.75 * Math.sqrt(Math.random()), a = Math.random() * TAU;
-      var up = Math.min(Kit.spallSpeed(charge, depth, r) * 0.32, 13) * (0.7 + 0.5 * Math.random());
-      emitSpray(x + Math.cos(a) * r, surf + 0.05, z + Math.sin(a) * r, Math.cos(a) * r * 0.6, up, Math.sin(a) * r * 0.6, 0.035 + Math.random() * 0.08, 0.5 + Math.random() * 0.5, 1.2);   // fine spray, not blobs
+      var r = domeR * 1.3 * Math.sqrt(Math.random()), a = Math.random() * TAU;
+      var up = launchSpeed(Math.min(0.5 * Math.pow(Kit.spallSpeed(charge, depth, r), 2) / (2 * 9.81) * 0.35, bl.plumeHeight * 0.8)) * (0.6 + 0.5 * Math.random());
+      emitSpray(x + Math.cos(a) * r, surf + domeH * Math.exp(-r * r / (domeR * domeR)) * 0.5, z + Math.sin(a) * r, Math.cos(a) * (0.5 + r * 0.7), up, Math.sin(a) * (0.5 + r * 0.7),
+        0.03 + Math.random() * 0.07, 0.8 + Math.random() * 0.7, 1.3, 0.5);
     }
-    addFoam(x, z, bl.domeRadius * 0.6, 0.9);
-    var mound = Math.max(bl.bubbleRadius, 0.8) * 1.3;
-    addRipple(x, z, mound, 0.45);
-    later(0.08, function () { addRipple(x, z, mound * 1.2, 0.3); });
-    // the plume: the gas breaks through and throws water up as a ragged column of jets
-    later(bl.vents ? 0.03 : 0.12, function () {
-      var H = bl.plumeHeight, vtop = launchSpeed(H), R0 = bl.plumeRadius, k, f;
-      var core = Math.round(90 * sp);
+    addFoam(x, z, domeR * 1.1, 1.0);                                   // the dome is white: aerated, torn water
+    later(0.05, function () { addFoam(x, z, domeR * 1.1, -0.5); });
+    // the plume: the gas breaks through the dome and throws water up as a ragged column of jets
+    later(bl.vents ? 0.03 : 0.1, function () {
+      var H = bl.plumeHeight, vtop = launchSpeed(H), R0 = bl.plumeRadius, base = surf + domeH * 0.6, k, f;
+      var core = Math.round(420 * sp);
       for (k = 0; k < core; k++) {                                       // the core: one column, its water spread by speed
-        var rc = R0 * 0.45 * Math.sqrt(Math.random()), ac = Math.random() * TAU; f = 0.25 + 0.8 * Math.random();
-        emitSpray(x + Math.cos(ac) * rc, surf + 0.1, z + Math.sin(ac) * rc, Math.cos(ac) * rc * 0.8, vtop * Math.min(f, 1), Math.sin(ac) * rc * 0.8,
-          0.18 + Math.random() * 0.22, 1.4 + Math.random() * 1.0, 1.5);
+        var rc = R0 * 0.55 * Math.sqrt(Math.random()), ac = Math.random() * TAU; f = 0.2 + 0.85 * Math.random();
+        emitSpray(x + Math.cos(ac) * rc, base, z + Math.sin(ac) * rc, Math.cos(ac) * (0.3 + rc * 0.9), vtop * Math.min(f, 1), Math.sin(ac) * (0.3 + rc * 0.9),
+          0.1 + Math.random() * 0.22, 1.6 + Math.random() * 1.2, 0.85, 0.6);
       }
-      var spikes = 9 + Math.floor(Math.random() * 6);
+      var spikes = 12 + Math.floor(Math.random() * 6);
       for (var j = 0; j < spikes; j++) {                                 // jets thrown out at a slant, each a streak of drops
-        var az = Math.random() * TAU, el = (58 + Math.random() * 28) * DEG, sj = vtop * (0.6 + 0.45 * Math.random());
-        var ux = Math.cos(az) * Math.cos(el), uz = Math.sin(az) * Math.cos(el), uy = Math.sin(el), m = Math.round((14 + Math.random() * 12) * sp);
+        var az = (j + Math.random() * 0.7) / spikes * TAU, el = (52 + Math.random() * 34) * DEG, sj = vtop * (0.55 + 0.5 * Math.random());
+        var ux = Math.cos(az) * Math.cos(el), uz = Math.sin(az) * Math.cos(el), uy = Math.sin(el), m = Math.round((22 + Math.random() * 14) * sp);
         for (k = 0; k < m; k++) {
-          f = 0.3 + 0.7 * (k / m) + 0.05 * Math.random();
-          emitSpray(x + ux * R0 * 0.6, surf + 0.1, z + uz * R0 * 0.6, ux * sj * f + (Math.random() - 0.5) * 0.4, uy * sj * f, uz * sj * f + (Math.random() - 0.5) * 0.4,
-            0.07 + Math.random() * 0.12, 1.3 + Math.random() * 1.1, 1.5);
+          f = 0.25 + 0.75 * (k / m) + 0.05 * Math.random();
+          emitSpray(x + ux * R0 * 0.7, base, z + uz * R0 * 0.7, ux * sj * f + (Math.random() - 0.5) * 0.5, uy * sj * f, uz * sj * f + (Math.random() - 0.5) * 0.5,
+            0.05 + Math.random() * 0.1, 1.5 + Math.random() * 1.2, 1.4, 0.3);
         }
       }
-      for (k = 0; k < 16 * sp; k++) {                                    // a little mist that hangs after it
-        var am = Math.random() * TAU, rm = R0 * 1.4 * Math.random();
-        emitSpray(x + Math.cos(am) * rm, surf + H * 0.25 * Math.random(), z + Math.sin(am) * rm, Math.cos(am) * 1.0, 0.8 + Math.random() * 2, Math.sin(am) * 1.0, 0.7 + Math.random() * 0.8, 2.5 + Math.random() * 2, 0.3);
+      for (k = 0; k < 24 * sp; k++) {                                    // mist that hangs after it
+        var am = Math.random() * TAU, rm = R0 * 1.6 * Math.random();
+        emitSpray(x + Math.cos(am) * rm, surf + H * 0.3 * Math.random(), z + Math.sin(am) * rm, Math.cos(am) * 1.2, 0.8 + Math.random() * 2.5, Math.sin(am) * 1.2, 0.9 + Math.random() * 1.0, 3 + Math.random() * 2, 0.3);
       }
     });
-    // the gas bubble collapses: the crater it leaves rings out as waves
-    later(bl.bubblePeriod + 0.15, function () { addRipple(x, z, mound * 1.4, -0.55); });
-    later(bl.bubblePeriod + 0.5, function () { addRipple(x, z, mound * 1.2, 0.4); });
-    later(bl.bubblePeriod + 0.85, function () { addRipple(x, z, mound, -0.22); });
-    // the column falls back: a wide patch of white water and a rain of small splashes
+    // the gas bubble collapses under the dome: the hollow left behind rings out as more waves
+    later(bl.bubblePeriod + 0.3, function () { addRipple(x, z, domeR * 0.8, -0.45 * domeH); });
+    later(bl.bubblePeriod + 0.75, function () { addRipple(x, z, domeR * 0.7, 0.25 * domeH); });
+    // the column falls back: a wide patch of white water and a rain of splashes
     var back = 2 * Math.sqrt(2 * bl.plumeHeight / 9.81) * 0.8;
-    later(back, function () {
-      addFoam(x, z, bl.plumeRadius * 3 + 2, -0.95);
-      for (var m = 0; m < 14; m++) later(Math.random() * 0.7, function () {
-        var a2 = Math.random() * TAU, r2 = (bl.plumeRadius * 2 + 1.5) * Math.sqrt(Math.random());
-        addRipple(x + Math.cos(a2) * r2, z + Math.sin(a2) * r2, 0.25, -0.06);
+    later(back * 0.7, function () {
+      addFoam(x, z, bl.plumeRadius * 2 + domeR, -0.55);
+      for (var m = 0; m < 18; m++) later(Math.random() * 0.9, function () {
+        var a2 = Math.random() * TAU, r2 = (bl.plumeRadius * 2.5 + domeR) * Math.sqrt(Math.random());
+        addRipple(x + Math.cos(a2) * r2, z + Math.sin(a2) * r2, 0.3, -0.08);
       });
     });
     var dist = Math.hypot(x - cam.pos[0], surf - cam.pos[1], z - cam.pos[2]), del = dist / 343, g = clamp(1.9 - dist / 250, 0.25, 1.8);
     oneShot('brown', 'lowpass', 85, g * 1.4, 0.004, 1.1, del, 0.55);              // the thump through the water and the hull
     oneShot('brown', 'lowpass', 260, g * 0.8, 0.003, 0.35, del, 0.9);
-    oneShot('white', 'bandpass', 650, g * 0.55, 0.15, 2.2, del + 0.12);             // the plume going up
-    oneShot('pink', 'highpass', 1700, g * 0.4, 0.4, 1.8, del + back * 0.8);          // and coming down
+    oneShot('white', 'bandpass', 650, g * 0.6, 0.12, 2.2, del + 0.1);              // the plume going up
+    oneShot('pink', 'highpass', 1700, g * 0.45, 0.4, 1.8, del + back * 0.7);         // and coming down
   }
   function airBurst(p) {                                              // the fuse ran out before it reached the water
     for (var k = 0; k < 60; k++) emitSpray(p[0], p[1], p[2], (Math.random() - 0.5) * 6, (Math.random() - 0.3) * 4, (Math.random() - 0.5) * 6, 0.5 + Math.random() * 0.9, 1.8 + Math.random() * 2, -0.8);
@@ -2385,12 +2416,14 @@
   // ===========================================================================
   //  particles: spray and splashes (CPU), rain (GPU, from the instance id)
   // ===========================================================================
-  var PMAX = 3000, PS = 10, part = { n: 0, x: new Float32Array(PMAX * PS), inst: new Float32Array(PMAX * 5), vao: null, ib: null, quad: null, rainVao: null };
-  function emitSpray(x, y, z, vx, vy, vz, size, life, alpha) {
+  var PMAX = 3000, PS = 11, IS = 8, part = { n: 0, x: new Float32Array(PMAX * PS), inst: new Float32Array(PMAX * IS), vao: null, ib: null, quad: null, rainVao: null };
+  // grow: how much a puff swells over its life (spray 1.6; drops of water hardly at all)
+  function emitSpray(x, y, z, vx, vy, vz, size, life, alpha, grow) {
     if (part.n >= PMAX) return;
     var o = part.n++ * PS, X = part.x;
     X[o] = x; X[o + 1] = y; X[o + 2] = z; X[o + 3] = vx; X[o + 4] = vy; X[o + 5] = vz; X[o + 6] = life; X[o + 7] = life; X[o + 8] = size;
     X[o + 9] = alpha === undefined ? 1 : alpha;
+    X[o + 10] = grow === undefined ? 1.6 : grow;
   }
   function stepParticles(dt) {
     var X = part.x, drag = Math.exp(-1.4 * dt);
@@ -2418,8 +2451,9 @@
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     part.ib = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, part.ib); gl.bufferData(gl.ARRAY_BUFFER, part.inst.byteLength, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 20, 0); gl.vertexAttribDivisor(1, 1);
-    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16); gl.vertexAttribDivisor(2, 1);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, IS * 4, 0); gl.vertexAttribDivisor(1, 1);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, IS * 4, 16); gl.vertexAttribDivisor(2, 1);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, IS * 4, 20); gl.vertexAttribDivisor(3, 1);
     var rq = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, rq);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, 0, 1, 0, 1, 1, -1, 0, 1, 1, -1, 1]), gl.STATIC_DRAW);
@@ -2436,12 +2470,14 @@
       var X = part.x, I = part.inst;
       for (var i = 0; i < part.n; i++) {
         var o = i * PS, f = X[o + 6] / X[o + 7];
-        I[i * 5] = X[o]; I[i * 5 + 1] = X[o + 1]; I[i * 5 + 2] = X[o + 2];
-        I[i * 5 + 3] = X[o + 8] * (1 + (1 - f) * 1.6);
-        I[i * 5 + 4] = Math.pow(f, 0.7) * 0.6 * X[o + 9];
+        var q = i * IS;
+        I[q] = X[o]; I[q + 1] = X[o + 1]; I[q + 2] = X[o + 2];
+        I[q + 3] = X[o + 8] * (1 + (1 - f) * X[o + 10]);
+        I[q + 4] = Math.pow(f, 0.7) * 0.6 * X[o + 9];
+        I[q + 5] = X[o + 3]; I[q + 6] = X[o + 4]; I[q + 7] = X[o + 5];
       }
-      gl.bindBuffer(gl.ARRAY_BUFFER, part.ib); gl.bufferSubData(gl.ARRAY_BUFFER, 0, I.subarray(0, part.n * 5));
-      setFrame(prog.spray.use()).m4('uViewProj', cam.viewProj).v3('uCamRight', cam.right).v3('uCamUp', cam.up);
+      gl.bindBuffer(gl.ARRAY_BUFFER, part.ib); gl.bufferSubData(gl.ARRAY_BUFFER, 0, I.subarray(0, part.n * IS));
+      setFrame(prog.spray.use()).m4('uViewProj', cam.viewProj).v3('uCamRight', cam.right).v3('uCamUp', cam.up).f('uShutter', 1 / 50);
       gl.bindVertexArray(part.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, part.n);
     }
@@ -3505,7 +3541,7 @@
           for (var i = 0; i < bodies.length; i++) for (var j = i + 1; j < bodies.length; j++) m = Math.max(m, boxContact(bodies[i], bodies[j]), boxContact(bodies[j], bodies[i]));
           return m;
         },
-        spawn: spawn, throwAt: throwAt, throws: throws, thrown: thrown, rippleFocus: rippleFocus, THROW: THROW, blast: blast,
+        spawn: spawn, domes: domes, throwAt: throwAt, throws: throws, thrown: thrown, rippleFocus: rippleFocus, THROW: THROW, blast: blast,
         tour: tour, startTour: startTour, stepTour: stepTour, fire: fireCannons, ship: ship, film: film, renderFilm: renderFilm, TOUR: TOUR, sea: sea, sun: sun, exportText: function (f) { return OP.exporters[f](state, derived()); },
         set: function (k, v) { setValue(k, v); if (k === 'sea' || k === 'quality') { applySea(true); if (fft) { fft.reset(simTime, 1 / 60, origin[0], origin[1]); fft.calibrateFoam(); seaReady(); } } },
         // n simulated steps; the last few are drawn (so temporal accumulation settles). readPixels makes the call wait for the GPU.

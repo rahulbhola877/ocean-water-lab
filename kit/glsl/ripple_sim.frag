@@ -38,7 +38,7 @@ void main() {
         vec2 q = (vUv - uSplats[i].xy) / uSplats[i].z;
         h += uSplats[i].w * exp(-dot(q, q));          // something pushed the surface here
     }
-    h = clamp(h, -0.6, 0.6);
+    h = clamp(h, -3.0, 3.0);                          // room for the heave over an underwater blast
     vec2 e = min(vUv, 1.0 - vUv);
     float fade = clamp(min(e.x, e.y) * 16.0, 0.0, 1.0);   // absorb at the border
     fragColor = vec4(h * fade, vel * fade, 0.0, 1.0);

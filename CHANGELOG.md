@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.1
+
+The grenade, reworked.
+
+- **The water heaves.** The shock lifts a dome of water over the charge, about 1 to 2 m for a grenade 2 to 3 m down. It rises in 0.2 s, then falls back and runs out as a ring of waves, carried by the ripple simulation; its heights are now allowed up to ±3 m (kit `ripple_sim.frag`). Anything floating on the dome rides it up, because the buoyancy now sees the dome.
+- **A plume that reads as water.** A translucent core and a dozen or more slanted jets, drawn as streaks of drops rather than puffs: spray particles are now stretched along their motion, as in a short exposure, and water drops no longer swell as they fly (smoke and mist still do). Each drop catches the light a little differently.
+- Fine spray from the torn surface, a white dome, the bubble's collapse, and a wider patch of white water when the column comes down.
+- The grenade goes off 2.6 s after the throw, so it is 2 to 3 m down, where a grenade throws the most water.
+
 ## 1.6.0
 
 Throw things in the water.

@@ -68,7 +68,7 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - Throw things in (pick one under *Click the water to drop or throw*, then click the sea; T throws at the middle of the view):
   - a **pebble** or **stone** opens a cavity, throws up a crown of drops and a Worthington jet, plops, and sends rings across the water
   - a **skimming stone** skips when it meets the water flat and fast enough (Clanet, Hersen and Bocquet 2004), leaving a line of rings, then sinks
-  - a **grenade** sinks and goes off: a white dome of spray, a ragged plume, rings of waves from its gas bubble, and a shove on everything floating nearby from its shock (Cole's similitude laws)
+  - a **grenade** sinks and goes off: the water heaves up in a white dome that runs out as waves, a ragged plume of jets, the gas bubble's collapse, and a shove on everything floating nearby from the shock (Cole's similitude laws)
 - A planing speedboat, and a square-rigger that sails by the apparent wind (and reefs in a blow) and fires cannons.
 
 **Sound**

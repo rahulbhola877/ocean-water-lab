@@ -43,20 +43,31 @@ void main() {
 layout(location = 0) in vec2 aCorner;   // -1..1
 layout(location = 1) in vec4 aPosSize;  // per instance: world position, radius
 layout(location = 2) in float aAlpha;
+layout(location = 3) in vec3 aVel;      // per instance: velocity, m/s
 uniform mat4 uViewProj;
 uniform vec3 uCamRight, uCamUp;
 uniform float uEnvMaxLod;
+uniform float uShutter;                 // a drop is drawn as the streak it makes in this time
 out vec2 vQ;
 out float vA;
 out vec3 vLit;
 void main() {
-    vec3 w = aPosSize.xyz + (uCamRight * aCorner.x + uCamUp * aCorner.y) * aPosSize.w;
+    // stretched along its motion across the screen, like a drop seen in a short exposure
+    vec3 Vd = normalize(uCamPos - aPosSize.xyz);
+    vec3 m = aVel * uShutter;
+    m -= Vd * dot(m, Vd);
+    float len = length(m), r = aPosSize.w;
+    vec3 along = len > 1e-4 ? m / len : uCamUp;
+    vec3 across = len > 1e-4 ? normalize(cross(along, Vd)) : uCamRight;
+    float half_ = r + 0.5 * len;
+    vec3 w = aPosSize.xyz + across * (aCorner.x * r) + along * (aCorner.y * half_);
     vQ = aCorner;
-    vA = abs(aAlpha);
+    vA = abs(aAlpha) * mix(1.0, r / half_, 0.6);                        // the same water spread over a longer streak
     float smoke = step(aAlpha, 0.0);                                    // negative alpha: grey gun smoke
     vec3 V = normalize(uCamPos - aPosSize.xyz);
     float fwd = pow(max(dot(-V, uSunDir), 0.0), 6.0);                      // bright when backlit
-    vLit = 0.85 * (uSunColor * (0.6 * max(uSunDir.y, 0.1) / PI + 0.35 * fwd) + envAmbient(uEnvMaxLod)) * mix(1.0, 0.42, smoke);
+    float vary = 0.72 + 0.4 * fract(sin(float(gl_InstanceID) * 12.9898) * 43758.5453);   // drops and clumps catch the light differently
+    vLit = 0.85 * vary * (uSunColor * (0.6 * max(uSunDir.y, 0.1) / PI + 0.35 * fwd) + envAmbient(uEnvMaxLod)) * mix(1.0, 0.42, smoke);
     gl_Position = uViewProj * vec4(w, 1.0);
 }
 //@@ spray.frag
