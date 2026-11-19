@@ -426,6 +426,105 @@
     return buoyancyWith(function (x, z, out) { self.sample(x, z, cfg.minWavelength, depthAt ? depthAt(x, z) : 1e9, out); }, points, velocities, count, cfg, forces);
   };
 
+
+  // ---------------------------------------------------------------------------
+  //  Impacts: what the water does when something hits it, or blows up in it.
+  //  Plain functions of a few numbers, for a particle system, a ripple
+  //  simulation and the floating bodies to act on. SI units throughout.
+  // ---------------------------------------------------------------------------
+  var RHO_SEA = 1025, SOUND_SEA = 1500;
+
+  /* A solid body (mass kg, radius m of a sphere of the same volume) entering the water at
+     `speed` m/s, `angle` radians below the horizontal.
+     - Cavity: about a fifth of the kinetic energy E (less when the entry is glancing) opens a
+       roughly hemispherical cavity; its potential energy rho g pi Rc^4 / 4 gives its radius Rc,
+       and it is about as deep as it is wide.
+     - It closes in about 2.2 sqrt(Rc / g), and the closing throws up a Worthington jet of
+       height k U^2 / 2g with k = 0.18 R / (R + 0.03): small bodies lose more to surface
+       tension and to the bubble that pinches off.
+     - A crown of drops rises around it to about 0.6 of the jet, 1.6 Rc out.
+     - The surface overshoots as it refills, so the cavity rings: `pulses` lists four surface
+       displacements [time s, metres] at the impact point, for a ripple simulation to add as
+       splats of radius Rc. Each one sends out a ring.
+     - The "plop" is the bubble left behind ringing at its Minnaert frequency, 3.26 / r Hz,
+       with r about 0.4 R. */
+  function impactSplash(mass, radius, speed, angle, out) {
+    out = out || {};
+    var E = 0.5 * mass * speed * speed, vert = Math.sin(Math.min(Math.max(angle, 0.05), Math.PI / 2));
+    var Rc = Math.max(Math.pow(0.8 * E * (0.35 + 0.65 * vert) / (Math.PI * RHO_SEA * G), 0.25), 1.5 * radius);
+    var tc = 2.2 * Math.sqrt(Rc / G);
+    var jet = 0.18 * radius / (radius + 0.03) * speed * speed * vert / (2 * G);
+    out.energy = E;
+    out.cavityRadius = Rc;
+    out.cavityDepth = Rc;
+    out.collapseTime = tc;
+    out.jetHeight = jet;
+    out.jetSpeed = Math.sqrt(2 * G * jet);
+    out.crownHeight = 0.6 * jet;
+    out.crownRadius = 1.6 * Rc;
+    out.droplets = Math.round(Math.min(Math.max(6 * E, 4), 160));
+    out.bubbleFrequency = 3.26 / (0.4 * radius);
+    out.pulses = [0, -Rc, tc, 0.7 * Rc, 2 * tc, -0.35 * Rc, 3 * tc, 0.15 * Rc];
+    return out;
+  }
+
+  /* A flat stone (mass kg, disc radius m, tilted `attack` radians nose-up) meeting the water with
+     velocity (vx, vy, vz), vy < 0. After Clanet, Hersen & Bocquet (Nature 427, 29, 2004): it
+     skips when its path is under about 45 degrees less 1.5x how far the tilt is from the best
+     20 degrees, and its horizontal speed is above Umin = sqrt(8 m g / (rho S sin 2 attack)),
+     the speed at which the water's lift on the disc's wetted area holds its weight.
+     Each skip keeps 86 % of the horizontal speed (friction while it planes) and sends it back
+     up at 70 % of the vertical speed it came down with; a hop under 0.4 m/s is the last: it
+     planes and sinks. Writes the outgoing velocity to out[0..2]; returns true for a skip. */
+  function skipBounce(vx, vy, vz, mass, radius, attack, out) {
+    var uh = Math.hypot(vx, vz), down = Math.max(-vy, 0);
+    var beta = Math.atan2(down, Math.max(uh, 1e-9));
+    var a = Math.min(Math.max(attack, 0.02), 1.2);
+    var betaMax = (45 - 1.5 * Math.abs(a * 180 / Math.PI - 20)) * Math.PI / 180;
+    var umin = Math.sqrt(8 * mass * G / (RHO_SEA * Math.PI * radius * radius * Math.sin(2 * a)));
+    var up = 0.7 * down;
+    var skips = beta < betaMax && uh > umin && up > 0.4;
+    var keep = skips ? 0.86 : 0;
+    out[0] = vx * keep; out[1] = skips ? up : vy; out[2] = vz * keep;
+    return skips;
+  }
+
+  /* Underwater explosion of `charge` kg of TNT (or its equivalent: a hand grenade's 180 g of
+     Composition B is about 0.2 kg) at `depth` metres, from the similitude laws of Cole
+     (Underwater Explosions, 1948) as used by Swisdak (1978):
+       gas bubble radius  A = 3.38 (W / (d + 10.1))^(1/3) m
+       bubble period      T = 2.11 W^(1/3) / (d + 10.1)^(5/6) s
+     A bubble bigger than its depth vents through the surface (a blowout: a taller, narrower
+     plume). The plume height is an empirical fit, 18 W^(1/3) exp(-0.18 max(0, d/W^(1/3) - 0.7))
+     metres, tuned by eye to films of small charges, so approximate: 5 to 9 m for a grenade at 1 to 3 m, less deeper down.
+     The white dome over the charge is the surface torn into spray by the shock (spall), thrown
+     up at spallSpeed(); it spreads to about 2.5 depths. */
+  function underwaterBlast(charge, depth, out) {
+    out = out || {};
+    var w3 = Math.pow(Math.max(charge, 1e-6), 1 / 3), d = Math.max(depth, 0), A = 3.38 * Math.pow(charge / (d + 10.1), 1 / 3);
+    out.bubbleRadius = A;
+    out.bubblePeriod = 2.11 * w3 / Math.pow(d + 10.1, 5 / 6);
+    out.vents = A > d;
+    out.plumeHeight = 18 * w3 * Math.exp(-0.18 * Math.max(0, d / w3 - 0.7)) * (out.vents ? 1.25 : 1);
+    out.plumeRadius = out.vents ? 0.6 * A : 0.9 * A + 0.15 * d;
+    out.domeRadius = 2.5 * Math.max(d, 0.3);
+    out.domeSpeed = spallSpeed(charge, depth, 0);
+    out.energy = 4.6e6 * charge;
+    return out;
+  }
+  /* Peak pressure (Pa) and impulse (Pa s) of the shock at `range` m (Cole). Impulse times the
+     area of a hull's underside is the shove it gets; a light hull goes no faster than the water
+     under it, so take the smaller of that and about half the spallSpeed() there. */
+  function blastPressure(charge, range) { var w3 = Math.pow(charge, 1 / 3); return 52.4e6 * Math.pow(w3 / Math.max(range, 0.05), 1.13); }
+  function blastImpulse(charge, range) { var w3 = Math.pow(charge, 1 / 3); return 5768 * w3 * Math.pow(w3 / Math.max(range, 0.05), 0.89); }
+  /* The speed the shock throws the surface up at, `x` m sideways from over the charge: twice the
+     particle speed of the wave arriving at the free surface, 2 P cos(theta) / (rho c). Air drag
+     takes most of it out of the fine spray within a metre or two. */
+  function spallSpeed(charge, depth, x) {
+    var d = Math.max(depth, 0.1), R = Math.hypot(d, x);
+    return 2 * blastPressure(charge, R) * (d / R) / (RHO_SEA * SOUND_SEA);
+  }
+
   return {
     G: G,
     SWELL_WAVES: SWELL_WAVES,
@@ -435,6 +534,12 @@
     Rng: Rng,
     seaStateFromWind: seaStateFromWind,
     whitecapCoverage: whitecapCoverage,
-    jonswapShape: jonswapShape
+    jonswapShape: jonswapShape,
+    impactSplash: impactSplash,
+    skipBounce: skipBounce,
+    underwaterBlast: underwaterBlast,
+    blastPressure: blastPressure,
+    blastImpulse: blastImpulse,
+    spallSpeed: spallSpeed
   };
 });

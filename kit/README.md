@@ -96,6 +96,20 @@ Choose the analytic sea when you cannot run render-to-texture passes, when you n
 
 Conventions for both models: Y up, waves in the XZ plane, metres, seconds, radians. Shader positions are relative to the wave origin, which keeps precision far from the world origin.
 
+## Impacts: things hitting the water
+
+Plain functions of a few numbers, the same in `water_waves.js`, `WaterPhysics.h` and `WaterPhysics.cs` (C# names start with a capital, in the static class `WaterImpacts`). Feed their results to your particle system, your ripple simulation and your rigid bodies.
+
+| Function | Gives |
+|---|---|
+| `impactSplash(mass, radius, speed, angle)` | for a body entering the water: cavity radius and depth, the time it takes to close, Worthington jet height and speed, crown height and radius, a droplet count, the bubble's "plop" frequency, and `pulses`: four surface displacements `[time, metres]` to add to a ripple simulation as splats of the cavity's radius, each of which sends out a ring |
+| `skipBounce(vx, vy, vz, mass, discRadius, attack, out)` | whether a flat stone skips, and its velocity after the skip (Clanet, Hersen and Bocquet 2004: under about 45° at the best 20° tilt, above a minimum speed set by its weight and the lift on its wetted area) |
+| `underwaterBlast(charge, depth)` | for `charge` kg of TNT equivalent: gas bubble radius and period, whether it vents through the surface, plume height and radius, the radius and speed of the white spray dome |
+| `blastPressure(charge, range)`, `blastImpulse(charge, range)` | the shock's peak pressure (Pa) and impulse (Pa s). Impulse times the area of a hull's underside is the shove it gets |
+| `spallSpeed(charge, depth, x)` | how fast the shock throws the surface up, `x` m to the side of the spot over the charge. A light floating thing goes no faster than about half of this |
+
+Notes: the cavity takes a fifth of the entry energy; the jet height factor (`0.18 R / (R + 0.03)`) and the plume height fit are tuned by eye, so treat them as approximate. A ripple grid coarser than the real ripples (the demo's is 9 cm) carries waves that are too long, so the demo draws them 2.5 times taller to keep them as steep.
+
 ## Engine notes
 
 These follow each engine's documented conventions. They were not run inside the engines.
@@ -156,11 +170,11 @@ The demo's scene looks, water bodies and every parameter range are in `demo/inde
 
 - **FFT against a direct sum.** The GPU FFT output was compared with a direct CPU sum of the same spectrum at 40 points per cascade. Heights, displacements, slopes and Jacobian terms agree to within the 16-bit float storage (largest error 0.9 mm on 1.6 m waves). Measured RMS wave height matches the spectrum's to within sampling noise (`tests/fft_check.mjs`).
 - **Whitecaps.** After calibration, measured whitecap coverage matches the target within about ±25% across sea states (2.0% against 1.9% in a rough sea, 7.6% against 6.3% in a gale).
-- **Physics.** Floating objects stay at their waterline through instant sea-state changes. A crate's centre sits within 1 cm of the read-back surface height, and the asynchronous read-back path runs in the real frame loop. `tools/physics.mjs` runs the demo's bodies through a breeze, a hurricane, a turned-over boat, deep water, wind, a current and the surf, and checks the outcomes (for example, wave motion 10 m down is within 6 % of exp(-2π d / L); a crate drifts at about 1.5 % of a 9 m/s wind; a 1 m/s current carries it at 1.0 m/s).
-- **Analytic sea.** GPU and CPU heights agree to under 1 mm in a 2 m sea and under 1 cm in a 6 m gale. The C++ port matches the JavaScript reference to 7e-13, including the breaking, roller, wind and current terms and `breakingAccel` (`tests/crosscheck.*`). `WaterPatch` sampling and buoyancy were unit-tested in C++.
+- **Physics.** Floating objects stay at their waterline through instant sea-state changes. A crate's centre sits within 1 cm of the read-back surface height, and the asynchronous read-back path runs in the real frame loop. `tools/physics.mjs` runs the demo's bodies through a breeze, a hurricane, a turned-over boat, deep water, wind, a current and the surf, and checks the outcomes (for example, wave motion 10 m down is within 6 % of exp(-2π d / L); a crate drifts at about 1.5 % of a 9 m/s wind; a 1 m/s current carries it at 1.0 m/s). It also throws things in: a stone sinks at its terminal speed, a skimming stone skips, and a grenade under water shoves a barrel 2 m off at about 1.7 m/s and one 9 m off much less.
+- **Analytic sea.** GPU and CPU heights agree to under 1 mm in a 2 m sea and under 1 cm in a 6 m gale. The C++ port matches the JavaScript reference to 7e-13, including the breaking, roller, wind and current terms, `breakingAccel` and the impact functions (`tests/crosscheck.*`). `WaterPatch` sampling and buoyancy were unit-tested in C++.
 - **HLSL.** All six libraries are generated mechanically from the GLSL and type-checked with clang's HLSL front end. They have not been compiled with FXC/DXC or run on a Direct3D device.
 - **Surf, tide, weather, wakes.** Checked by eye in a software renderer, from above the breakers and at water level, and with debug views of breaking and phase. The JavaScript surf and rogue-wave heights use the same formulas as the shaders, but have not been compared numerically against the GPU.
-- **C#.** Ported by hand, line for line with the C++; no C# compiler was available, so it has not been compiled.
+- **C#.** Ported by hand, line for line with the C++. The whole file compiles with Mono's `mcs`; the impact functions match the C++ to 3e-16. The wave and buoyancy code has not been compared numerically.
 - **Performance.** Only measured on a software renderer: about 13 fps at 800×500 on High, on a CPU. Frame rates on real GPUs were not measured.
 
 ## What it does not do
@@ -184,4 +198,7 @@ The demo's scene looks, water bodies and every parameter range are in `demo/inde
 - Fresnel reflectance of a rough sea: Bruneton, Neyret and Holzschuch 2010
 - Sky: Hillaire, "A Scalable and Production Ready Sky and Atmosphere Rendering Technique", 2020
 - Slope-variance (LEAN) filtering: Olano and Baker 2010
+- Stone skipping: Clanet, Hersen and Bocquet, Nature 427, 29 (2004)
+- Underwater explosions: Cole, Underwater Explosions (1948); Swisdak, Explosion Effects and Properties Part II (1978)
+- Bubble resonance: Minnaert (1933)
 - Random numbers: mulberry32 by Tommy Ettinger (public domain)

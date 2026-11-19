@@ -33,7 +33,16 @@ int main() {
         st.breakSpeed = 6; st.breakAccel = 0.05; st.windX = 12; st.windZ = -5; st.currentX = 0.4; st.currentZ = 0.2; st.linearDragH = 0.2; st.airDrag = 1.1;
         double ptsS[12] = { 0, 0.3, 0,  1, 0.9, 0.5,  -2, 0.1, 3,  5, -0.4, -4 };
         wet = w.buoyancy(ptsS, vel, 4, st, water::openOcean, f);
-        printf("\"storm\":[%.17g,%.17g", w.breakingAccel(0.4 * water::whitecapCoverage(w.params.windSpeed), 2), wet); for (int i = 0; i < 12; i++) printf(",%.17g", f[i]); printf("]}");
+        printf("\"storm\":[%.17g,%.17g", w.breakingAccel(0.4 * water::whitecapCoverage(w.params.windSpeed), 2), wet); for (int i = 0; i < 12; i++) printf(",%.17g", f[i]); printf("],");
+        // impacts: a splash, a skip, an underwater blast and its shock
+        water::Splash sp = water::impactSplash(0.02 + 0.3 * c, 0.012 + 0.02 * c, 6 + 3 * c, 0.3 + 0.35 * c);
+        double sk[3]; bool skips = water::skipBounce(12 - c, -1.5 - 0.8 * c, 3 + c, 0.1, 0.04, 0.2 + 0.1 * c, sk);
+        water::Blast bl = water::underwaterBlast(0.2 * (c + 1), 0.5 + 1.2 * c);
+        printf("\"impacts\":[%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d", sp.energy, sp.cavityRadius, sp.cavityDepth, sp.collapseTime, sp.jetHeight, sp.jetSpeed, sp.crownHeight, sp.crownRadius, sp.bubbleFrequency, sp.droplets);
+        for (int i = 0; i < 8; i++) printf(",%.17g", sp.pulses[i]);
+        printf(",%d,%.17g,%.17g,%.17g", skips ? 1 : 0, sk[0], sk[1], sk[2]);
+        printf(",%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d", bl.bubbleRadius, bl.bubblePeriod, bl.plumeHeight, bl.plumeRadius, bl.domeRadius, bl.domeSpeed, bl.energy, bl.vents ? 1 : 0);
+        printf(",%.17g,%.17g,%.17g]}", water::blastPressure(0.2, 1.5 + c), water::blastImpulse(0.2, 1.5 + c), water::spallSpeed(0.2, 1 + c, 2.5));
     }
     printf("]\n");
     return 0;

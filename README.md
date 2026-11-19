@@ -65,10 +65,14 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - Wind (with the visible gust fronts) on everything above the water, so flotsam drifts downwind; an optional steady current.
 - Open hulls flood when green water comes over the deck edge. A boat lying past 90° capsizes and stays over until you press R (or the autopilot's crew rights her).
 - Bodies collide as boxes, with spin.
+- Throw things in (pick one under *Click the water to drop or throw*, then click the sea; T throws at the middle of the view):
+  - a **pebble** or **stone** opens a cavity, throws up a crown of drops and a Worthington jet, plops, and sends rings across the water
+  - a **skimming stone** skips when it meets the water flat and fast enough (Clanet, Hersen and Bocquet 2004), leaving a line of rings, then sinks
+  - a **grenade** sinks and goes off: a white dome of spray, a ragged plume, rings of waves from its gas bubble, and a shove on everything floating nearby from its shock (Cole's similitude laws)
 - A planing speedboat, and a square-rigger that sails by the apparent wind (and reefs in a blow) and fires cannons.
 
 **Sound**
-- Procedural ocean, wash, wind, rain, thunder, engine, cannons and splashes. Turn it on with *Sound*.
+- Procedural ocean, wash, wind, rain, thunder, engine, cannons and splashes, plops and underwater thumps. Turn it on with *Sound*.
 
 ## Water Lite: for low-end and stylized games
 
@@ -134,7 +138,7 @@ media/           screenshots
 - **Frame rates:** only measured on a software renderer. Frame rates on real GPUs have not been measured yet. Reports welcome.
 - **Surf:** breakers lean and throw a lip but never curl into a closed tube. They always come straight up the depth gradient, with no refraction around headlands.
 - **HLSL:** type-checked with clang, but not compiled with FXC/DXC or run on a Direct3D device.
-- **C#:** ported by hand and not compiled.
+- **C#:** ported by hand. It compiles with Mono's `mcs`, and its impact functions match the C++ to 3e-16, but the wave and buoyancy code has not been compared with the C++ numerically.
 - **Engine export:** the Unity HDRP and Unreal mappings are approximate. Only the kit uniforms are exact.
 - **The pirate ship's sails:** tuned for play, not for naval architecture.
 
@@ -153,6 +157,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Engine ports, real-GPU performance numbe
 - Hillaire 2020, sky and atmosphere
 - Schneider 2015, *Horizon Zero Dawn* clouds
 - Green's law and breaker index from standard coastal engineering texts
+- Clanet, Hersen and Bocquet 2004, *Secrets of successful stone-skipping* (Nature 427)
+- Cole 1948, *Underwater Explosions*; Swisdak 1978, *Explosion Effects and Properties, Part II*
+- Minnaert 1933, the ringing of an air bubble in water
 
 ## Third-party code
 

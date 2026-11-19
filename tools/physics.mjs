@@ -106,7 +106,32 @@ await run('surf', () => {
   }
   return { bed: +best[2].toFixed(1), shorewardMax: +umax.toFixed(2), seawardMax: +(-umin).toFixed(2), mean: +(mean / n).toFixed(2), boreFrac: +(brk / n).toFixed(2) };
 });
+// things thrown in: a stone splashes and sinks to the bottom, a skimming stone skips, a grenade
+// goes off under water and shoves what floats near it harder than what floats further off
+await run('throws', () => {
+  const L = window.OceanLab, out = {};
+  L.scene('glass'); L.state.rogue = 0; L.rogue.on = false; L.rogue.h = 0; L.state.boat = false; L.apply(); L.bodies.length = 0;
+  L.cam.pos = [0, 4, 12]; L.cam.target = [0, 0, 0]; L.cam.tTarget = [0, 0, 0];
+  const s0 = L.thrown.splashes, stone = L.throwAt('stone', [0, 0, 0]);
+  L.step(240, 1 / 60);
+  out.stone = { splashed: L.thrown.splashes - s0, wet: stone.wet, sinkRate: +(-stone.p[1] / (stone.t - stone.wetAt)).toFixed(2), terminal: +stone.vt.toFixed(2), cavity: +L.thrown.last.cavityRadius.toFixed(3), jet: +L.thrown.last.jetHeight.toFixed(2) };
+  const sk = L.throwAt('skimmer', [0, 0, 0]);
+  L.step(300, 1 / 60);
+  out.skimmer = { skips: sk.skips };
+  const near = L.spawn('barrel', 2, 0.2, 0), far = L.spawn('barrel', -9, 0.2, 0);
+  L.step(240, 1 / 60);
+  const v0n = near.vel.slice(), v0f = far.vel.slice(), b0 = L.thrown.blasts;
+  L.blast(0, 2.5, 0, 0.2);
+  L.step(1, 1 / 60);
+  out.grenade = { blasts: L.thrown.blasts - b0, nearUp: +(near.vel[1] - v0n[1]).toFixed(2), nearOut: +(near.vel[0] - v0n[0]).toFixed(2), farOut: +(v0f[0] - far.vel[0]).toFixed(2), particles: L.particles() };
+  L.step(300, 1 / 60);
+  out.grenade.after = { nearY: +near.pos[1].toFixed(2), alive: L.bodies.indexOf(near) >= 0 };
+  return out;
+});
 const r = R;
+check('throws: a stone splashes and sinks at its terminal speed', r.throws && r.throws.stone.splashed === 1 && r.throws.stone.wet && Math.abs(r.throws.stone.sinkRate - r.throws.stone.terminal) < 0.3 * r.throws.stone.terminal, r.throws && JSON.stringify(r.throws.stone));
+check('throws: a skimming stone thrown low and fast skips several times', r.throws && r.throws.skimmer.skips >= 3, r.throws && r.throws.skimmer.skips + ' skips');
+check('throws: a grenade under water kicks a barrel 2 m off up and away, one 9 m off much less', r.throws && r.throws.grenade.blasts === 1 && r.throws.grenade.nearUp > 0.5 && r.throws.grenade.nearOut > 0.3 && r.throws.grenade.farOut < r.throws.grenade.nearOut * 0.5 && r.throws.grenade.after.alive, r.throws && JSON.stringify(r.throws.grenade));
 check('breezeBoat: a speedboat in a breeze stays upright', r.breezeBoat && r.breezeBoat.capsizes === 0 && r.breezeBoat.maxTiltDeg < 60, r.breezeBoat && r.breezeBoat.maxTiltDeg + ' deg max');
 check('stormBoat: hurricane seas throw the speedboat about', r.stormBoat && r.stormBoat.alive && r.stormBoat.maxTiltDeg > 30 && r.stormBoat.brk.share > 0.05, r.stormBoat && r.stormBoat.maxTiltDeg + ' deg max, ' + r.stormBoat.capsizes + ' capsizes, breaking on ' + (r.stormBoat.brk.share * 100).toFixed(1) + '% of the sea');
 check('stormShip: the ship heels but stays up', r.stormShip && r.stormShip.alive && r.stormShip.maxTiltDeg < 80 && r.stormShip.maxTiltDeg > 15, r.stormShip && r.stormShip.maxTiltDeg + ' deg max');

@@ -569,4 +569,74 @@ namespace WaterKit
             o.ax = q[4]; o.ay = q[5]; o.az = q[6];
         }
     }
+
+    /// <summary>What the water does when something hits it, or blows up in it.
+    /// Same models and numbers as water_waves.js (see the notes there). SI units.</summary>
+    public static class WaterImpacts
+    {
+        public const double Gravity = 9.81, SeaDensity = 1025, SoundInSea = 1500;
+
+        public struct Splash
+        {
+            public double energy, cavityRadius, cavityDepth, collapseTime, jetHeight, jetSpeed, crownHeight, crownRadius, bubbleFrequency;
+            public int droplets;
+            public double[] pulses;            // [time s, surface displacement m] x 4, splats of radius cavityRadius
+        }
+
+        /// <summary>A solid body (mass kg, radius m of a sphere of the same volume) entering at speed m/s, angle radians below the horizontal.</summary>
+        public static Splash ImpactSplash(double mass, double radius, double speed, double angle)
+        {
+            double E = 0.5 * mass * speed * speed, vert = Math.Sin(Math.Min(Math.Max(angle, 0.05), Math.PI / 2));
+            double Rc = Math.Max(Math.Pow(0.8 * E * (0.35 + 0.65 * vert) / (Math.PI * SeaDensity * Gravity), 0.25), 1.5 * radius);
+            double tc = 2.2 * Math.Sqrt(Rc / Gravity);
+            double jet = 0.18 * radius / (radius + 0.03) * speed * speed * vert / (2 * Gravity);
+            return new Splash
+            {
+                energy = E, cavityRadius = Rc, cavityDepth = Rc, collapseTime = tc,
+                jetHeight = jet, jetSpeed = Math.Sqrt(2 * Gravity * jet), crownHeight = 0.6 * jet, crownRadius = 1.6 * Rc,
+                droplets = (int)Math.Round(Math.Min(Math.Max(6 * E, 4.0), 160.0), MidpointRounding.AwayFromZero),
+                bubbleFrequency = 3.26 / (0.4 * radius),
+                pulses = new double[] { 0, -Rc, tc, 0.7 * Rc, 2 * tc, -0.35 * Rc, 3 * tc, 0.15 * Rc }
+            };
+        }
+
+        /// <summary>A flat stone (mass kg, disc radius m, tilt attack radians) meeting the water at (vx, vy, vz).
+        /// Writes the outgoing velocity to output; returns true for a skip (Clanet, Hersen and Bocquet 2004).</summary>
+        public static bool SkipBounce(double vx, double vy, double vz, double mass, double radius, double attack, double[] output)
+        {
+            double uh = Math.Sqrt(vx * vx + vz * vz), down = Math.Max(-vy, 0.0);
+            double beta = Math.Atan2(down, Math.Max(uh, 1e-9));
+            double a = Math.Min(Math.Max(attack, 0.02), 1.2);
+            double betaMax = (45 - 1.5 * Math.Abs(a * 180 / Math.PI - 20)) * Math.PI / 180;
+            double umin = Math.Sqrt(8 * mass * Gravity / (SeaDensity * Math.PI * radius * radius * Math.Sin(2 * a)));
+            double up = 0.7 * down;
+            bool skips = beta < betaMax && uh > umin && up > 0.4;
+            double keep = skips ? 0.86 : 0;
+            output[0] = vx * keep; output[1] = skips ? up : vy; output[2] = vz * keep;
+            return skips;
+        }
+
+        public static double BlastPressure(double charge, double range) { double w3 = Math.Pow(charge, 1.0 / 3.0); return 52.4e6 * Math.Pow(w3 / Math.Max(range, 0.05), 1.13); }
+        public static double BlastImpulse(double charge, double range) { double w3 = Math.Pow(charge, 1.0 / 3.0); return 5768 * w3 * Math.Pow(w3 / Math.Max(range, 0.05), 0.89); }
+        public static double SpallSpeed(double charge, double depth, double x)
+        {
+            double d = Math.Max(depth, 0.1), R = Math.Sqrt(d * d + x * x);
+            return 2 * BlastPressure(charge, R) * (d / R) / (SeaDensity * SoundInSea);
+        }
+
+        public struct Blast { public double bubbleRadius, bubblePeriod, plumeHeight, plumeRadius, domeRadius, domeSpeed, energy; public bool vents; }
+
+        /// <summary>charge kg of TNT equivalent at depth m (Cole 1948; Swisdak 1978).</summary>
+        public static Blast UnderwaterBlast(double charge, double depth)
+        {
+            double w3 = Math.Pow(Math.Max(charge, 1e-6), 1.0 / 3.0), d = Math.Max(depth, 0.0), A = 3.38 * Math.Pow(charge / (d + 10.1), 1.0 / 3.0);
+            var o = new Blast { bubbleRadius = A, bubblePeriod = 2.11 * w3 / Math.Pow(d + 10.1, 5.0 / 6.0), vents = A > d };
+            o.plumeHeight = 18 * w3 * Math.Exp(-0.18 * Math.Max(0.0, d / w3 - 0.7)) * (o.vents ? 1.25 : 1.0);
+            o.plumeRadius = o.vents ? 0.6 * A : 0.9 * A + 0.15 * d;
+            o.domeRadius = 2.5 * Math.Max(d, 0.3);
+            o.domeSpeed = SpallSpeed(charge, depth, 0);
+            o.energy = 4.6e6 * charge;
+            return o;
+        }
+    }
 }

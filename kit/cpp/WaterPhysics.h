@@ -488,4 +488,67 @@ struct WaterPatch {
     Sampler sampler(double t) const { return Sampler{ this, t }; }
 };
 
+
+// ============================================================================
+//  Impacts: what the water does when something hits it, or blows up in it.
+//  Same models and numbers as water_waves.js (see the notes there). SI units.
+// ============================================================================
+const double kSeaDensity = 1025, kSoundInSea = 1500;
+
+struct Splash {
+    double energy, cavityRadius, cavityDepth, collapseTime, jetHeight, jetSpeed, crownHeight, crownRadius, bubbleFrequency;
+    int droplets;
+    double pulses[8];                  // [time s, surface displacement m] x 4, splats of radius cavityRadius
+};
+// A solid body (mass kg, radius m of a sphere of the same volume) entering at speed m/s, angle radians below the horizontal.
+inline Splash impactSplash(double mass, double radius, double speed, double angle) {
+    Splash o;
+    double E = 0.5 * mass * speed * speed, vert = std::sin(std::min(std::max(angle, 0.05), kTau / 4));
+    double Rc = std::max(std::pow(0.8 * E * (0.35 + 0.65 * vert) / (kTau / 2 * kSeaDensity * kGravity), 0.25), 1.5 * radius);
+    double tc = 2.2 * std::sqrt(Rc / kGravity);
+    double jet = 0.18 * radius / (radius + 0.03) * speed * speed * vert / (2 * kGravity);
+    o.energy = E; o.cavityRadius = Rc; o.cavityDepth = Rc; o.collapseTime = tc;
+    o.jetHeight = jet; o.jetSpeed = std::sqrt(2 * kGravity * jet); o.crownHeight = 0.6 * jet; o.crownRadius = 1.6 * Rc;
+    o.droplets = (int)std::lround(std::min(std::max(6 * E, 4.0), 160.0));
+    o.bubbleFrequency = 3.26 / (0.4 * radius);
+    double p[8] = { 0, -Rc, tc, 0.7 * Rc, 2 * tc, -0.35 * Rc, 3 * tc, 0.15 * Rc };
+    for (int i = 0; i < 8; i++) o.pulses[i] = p[i];
+    return o;
+}
+// A flat stone (mass kg, disc radius m, tilt `attack` radians) meeting the water at (vx, vy, vz).
+// Writes the outgoing velocity to out[3]; returns true for a skip (Clanet, Hersen & Bocquet 2004).
+inline bool skipBounce(double vx, double vy, double vz, double mass, double radius, double attack, double out[3]) {
+    double uh = std::hypot(vx, vz), down = std::max(-vy, 0.0);
+    double beta = std::atan2(down, std::max(uh, 1e-9));
+    double a = std::min(std::max(attack, 0.02), 1.2);
+    double betaMax = (45 - 1.5 * std::fabs(a * 360 / kTau - 20)) * kTau / 360;
+    double umin = std::sqrt(8 * mass * kGravity / (kSeaDensity * kTau / 2 * radius * radius * std::sin(2 * a)));
+    double up = 0.7 * down;
+    bool skips = beta < betaMax && uh > umin && up > 0.4;
+    double keep = skips ? 0.86 : 0;
+    out[0] = vx * keep; out[1] = skips ? up : vy; out[2] = vz * keep;
+    return skips;
+}
+inline double blastPressure(double charge, double range) { double w3 = std::cbrt(charge); return 52.4e6 * std::pow(w3 / std::max(range, 0.05), 1.13); }
+inline double blastImpulse(double charge, double range) { double w3 = std::cbrt(charge); return 5768 * w3 * std::pow(w3 / std::max(range, 0.05), 0.89); }
+inline double spallSpeed(double charge, double depth, double x) {
+    double d = std::max(depth, 0.1), R = std::hypot(d, x);
+    return 2 * blastPressure(charge, R) * (d / R) / (kSeaDensity * kSoundInSea);
+}
+struct Blast { double bubbleRadius, bubblePeriod, plumeHeight, plumeRadius, domeRadius, domeSpeed, energy; bool vents; };
+// `charge` kg of TNT equivalent at `depth` m (Cole 1948; Swisdak 1978).
+inline Blast underwaterBlast(double charge, double depth) {
+    Blast o;
+    double w3 = std::cbrt(std::max(charge, 1e-6)), d = std::max(depth, 0.0), A = 3.38 * std::cbrt(charge / (d + 10.1));
+    o.bubbleRadius = A;
+    o.bubblePeriod = 2.11 * w3 / std::pow(d + 10.1, 5.0 / 6.0);
+    o.vents = A > d;
+    o.plumeHeight = 18 * w3 * std::exp(-0.18 * std::max(0.0, d / w3 - 0.7)) * (o.vents ? 1.25 : 1.0);
+    o.plumeRadius = o.vents ? 0.6 * A : 0.9 * A + 0.15 * d;
+    o.domeRadius = 2.5 * std::max(d, 0.3);
+    o.domeSpeed = spallSpeed(charge, depth, 0);
+    o.energy = 4.6e6 * charge;
+    return o;
+}
+
 } // namespace water

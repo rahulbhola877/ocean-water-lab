@@ -26,6 +26,12 @@ for (let c = 0; c < 4; c++) {
     { pointVolume: 0.05, pointRadius: 0.18, pointArea: 0.13, waterDensity: 1025, linearDrag: 1.1, quadDrag: 1.0, minWavelength: 1.3,
       breakSpeed: 6, breakAccel: 0.05, windX: 12, windZ: -5, currentX: 0.4, currentZ: 0.2, linearDragH: 0.2, airDrag: 1.1 }, null, fs);
   cmp('storm', [w.breakingAccel(0.4 * K.whitecapCoverage(winds[c]), 2), wetS, ...fs], o.storm);
+  const sp = K.impactSplash(0.02 + 0.3 * c, 0.012 + 0.02 * c, 6 + 3 * c, 0.3 + 0.35 * c), sk = [0, 0, 0];
+  const skips = K.skipBounce(12 - c, -1.5 - 0.8 * c, 3 + c, 0.1, 0.04, 0.2 + 0.1 * c, sk);
+  const bl = K.underwaterBlast(0.2 * (c + 1), 0.5 + 1.2 * c);
+  cmp('impacts', [sp.energy, sp.cavityRadius, sp.cavityDepth, sp.collapseTime, sp.jetHeight, sp.jetSpeed, sp.crownHeight, sp.crownRadius, sp.bubbleFrequency, sp.droplets, ...sp.pulses,
+    skips ? 1 : 0, ...sk, bl.bubbleRadius, bl.bubblePeriod, bl.plumeHeight, bl.plumeRadius, bl.domeRadius, bl.domeSpeed, bl.energy, bl.vents ? 1 : 0,
+    K.blastPressure(0.2, 1.5 + c), K.blastImpulse(0.2, 1.5 + c), K.spallSpeed(0.2, 1 + c, 2.5)], o.impacts);
   console.log(`case ${c}: wind ${winds[c]} m/s, Hs ${w.significantHeight.toFixed(3)} m, foam threshold ${w.foamThreshold.toFixed(4)}`);
 }
 console.log('largest relative difference C++ vs JS, double-precision outputs:', worst.toExponential(2), worstName ? 'at ' + worstName : '');

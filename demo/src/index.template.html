@@ -106,6 +106,7 @@ input[type="range"]::-moz-range-thumb { width: 9px; height: 16px; background: va
   font-size: 14px; letter-spacing: 0.05em; color: var(--muted); pointer-events: none;
 }
 .hint .meter { color: var(--text); }
+.small-note { margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
 body.touring .forecast, body.touring .hint, body.touring #drive-hud { display: none; }
 #tour-caption { position: absolute; left: 24px; bottom: 76px; padding: 14px 22px 13px 20px; border-left: 4px solid var(--signal); display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
 #tour-caption[hidden] { display: none; }
@@ -158,7 +159,7 @@ body.nogl .panel, body.nogl .forecast, body.nogl .hint, body.failed .panel, body
 </style>
 </head>
 <body>
-<canvas id="sea" tabindex="0" aria-label="Real-time ocean. Drag to look around, scroll to zoom, click the water to drop an object."></canvas>
+<canvas id="sea" tabindex="0" aria-label="Real-time ocean. Drag to look around, scroll to zoom, click the water to drop or throw something."></canvas>
 
 <header class="forecast plate">
   <h1>Ocean Water Lab</h1>
@@ -247,13 +248,20 @@ body.nogl .panel, body.nogl .forecast, body.nogl .hint, body.failed .panel, body
     </div>
   </section>
   <section>
-    <h2>Click water to drop</h2>
+    <h2>Click the water to drop or throw</h2>
     <div class="chips">
       <button type="button" data-set="drop:crate">Crate</button>
       <button type="button" data-set="drop:barrel">Barrel</button>
       <button type="button" data-set="drop:buoy">Buoy</button>
       <button type="button" data-set="drop:raft">Raft</button>
     </div>
+    <div class="chips">
+      <button type="button" data-set="drop:pebble">Pebble</button>
+      <button type="button" data-set="drop:stone">Stone</button>
+      <button type="button" data-set="drop:skimmer">Skimming stone</button>
+      <button type="button" data-set="drop:grenade">Grenade</button>
+    </div>
+    <p class="small-note" id="throw-hint" hidden>Throws land where you click (T: the middle of the view). The skimming stone comes in low from your side; the grenade sinks and goes off 3.2 s after the throw.</p>
     <div class="chips">
       <button type="button" data-toggle="stir">Stir with drag</button>
       <button type="button" id="reset">Reset objects</button>

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0
+
+Throw things in the water.
+
+- **Pebble and stone.** Click the sea to throw one from where you stand (T throws at the middle of the view). It opens a cavity, throws up a crown of drops, and the cavity closing throws up a Worthington jet. You hear the plop of the bubble it leaves, and rings spread across the water. Then it sinks at its terminal speed and rests on the bottom.
+- **Skimming stone.** It comes in low and flat from your side and skips while it meets the water at a shallow enough angle and fast enough, after Clanet, Hersen and Bocquet (2004). Each skip leaves a ring; five to nine skips is usual, then it sinks.
+- **Grenade.** It sinks and goes off 3.2 s after the throw. The shock tears the surface into a white dome of spray and shoves everything floating nearby, by its impulse on the hull, no faster than the water under it. The gas breaks out as a ragged plume of jets a few metres high, its bubble collapses into rings of waves, and the column falls back as a patch of white water. A deep thump, the plume's roar and the hiss of it coming down follow, each delayed by its distance. Charge, bubble size and period, plume and shock follow Cole's similitude laws (1948, via Swisdak 1978).
+- **Kit:** `impactSplash`, `skipBounce`, `underwaterBlast`, `blastPressure`, `blastImpulse` and `spallSpeed` in JavaScript, C++ and C# (`WaterImpacts`), cross-checked: C++ against JavaScript to 7e-13, C# against C++ to 3e-16. The C# file now compiles with Mono's `mcs`.
+- The ripple and foam windows move over a splash that lands away from the middle of the view, for a while.
+- Spray particles are launched fast enough to reach their heights against the particles' air drag.
+- `tools/physics.mjs` checks the throws.
+
 ## 1.5.2
 
 Demo videos, and what making them showed up.
