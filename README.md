@@ -4,7 +4,7 @@
 
 ![Golden Coast with the advanced panel open](media/golden-coast-panel.jpg)
 
-**Videos:** [what's new in 1.5](media/ocean-lab-whats-new.mp4) (50 s, with sound) and [Water Lite, live demo](media/water-lite-demo.mp4) (74 s). Both were rendered frame by frame in the browser on an ordinary laptop GPU.
+**Videos:** [what's new in 1.5](media/ocean-lab-whats-new.mp4) (50 s, with sound), [Water Lite, live demo](media/water-lite-demo.mp4) (74 s) and [a grenade thrown in](media/throws-grenade.mp4) (new in 1.7, 9 s, with sound). The first two were rendered on an ordinary laptop GPU, the grenade in software.
 
 [![What's new in Ocean Water Lab 1.5: breaking crests, capsizing, lightning, storm sea, drift](media/ocean-lab-whats-new.jpg)](media/ocean-lab-whats-new.mp4)
 
@@ -69,6 +69,8 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
   - a **pebble** or **stone** opens a cavity, throws up a crown of drops and a Worthington jet, plops, and sends rings across the water
   - a **skimming stone** skips when it meets the water flat and fast enough (Clanet, Hersen and Bocquet 2004), leaving a line of rings, then sinks
   - a **grenade** sinks and goes off as a big game-style blast, bigger than a real one on purpose: a shockwave races out over the surface and throws everything it reaches into the air, a column of white water some 20 m high bursts up, a base surge rolls out, and it all comes down as a downpour. The kit's functions still give the real numbers (Cole's similitude laws)
+
+  [![A grenade thrown into the sea: the shockwave ring, the column and the base surge](media/throws-grenade.jpg)](media/throws-grenade.mp4)
 - A planing speedboat, and a square-rigger that sails by the apparent wind (and reefs in a blow) and fires cannons.
 
 **Sound**
