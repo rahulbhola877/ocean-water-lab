@@ -17,7 +17,7 @@ The demo also has seven game-look scenes, about 90 parameters on its Advanced ta
 | `glsl/fft/fft_*.frag` | Fragment-shader wrappers for the four FFT passes and the physics query (WebGL2 / OpenGL) |
 | `glsl/fft/water_cascades.glsl` | Sampling the FFT result: displacement, normal, Jacobian, filtered roughness, foam, height, caustics |
 | `glsl/water_waves.glsl` | Analytic wave sum: displacement, normals with per-wave anisotropic filtering, Jacobian, caustics |
-| `glsl/water_shading.glsl` | Shared surface shading: rough-sea Fresnel, GGX sun glitter, depth absorption, crest glow, foam texture, gale streaks, rain rings |
+| `glsl/water_shading.glsl` | Shared surface shading: rough-sea Fresnel, GGX sun glitter, depth absorption, crest glow, procedural foam (a sheet of bubbles that comes apart into lace), gale streaks, rain rings |
 | `glsl/ocean.vert`, `ocean.frag` | Reference material for either model: refraction, sky and planar reflections, foam, haze |
 | `glsl/water_surf.glsl` | Breaking surf on any coastline from a depth function: shoaling (Green's law), breaking at a breaker index, crests leaning and throwing a lip, streaky breaker foam |
 | `glsl/water_weather.glsl` | Sea-surface weather: rogue wave groups that focus as they pass, gust fronts (cat's paws) roughening patches of ripples, Langmuir slicks (glassy lanes along the wind with foam lines) |
@@ -151,7 +151,9 @@ Water colour lives in `WaterMaterial`: `extinction` (per metre, per colour), `sc
 | `uSurf` | surf height in deep water (m), period (s), breaker index (0.78 is typical), shore-foam gain |
 | `uSurfFoam` | foam trail (fraction of a wavelength behind each breaker), streakiness 0..1, texture scale, lingering foam 0..1 |
 
-**Surf.** Define `WATER_SURF`, include `water_surf.glsl` and provide `WATER_SURF_DEPTH(p)`. Call `waterSurf()` in the vertex stage for height and push, and in the fragment stage for the normal and `waterSurfFoam()`. The same formula in JavaScript (`surfHeight` in the demo) adds the surf to the physics height, so things float on the breakers.
+**Surf.** Define `WATER_SURF`, include `water_surf.glsl` and provide `WATER_SURF_DEPTH(p)`. Call `waterSurf()` in the vertex stage for height and push, and in the fragment stage for the normal and the foam: `waterFoamMask(waterSurfFoamPos(p, s), s.dir, waterSurfFoamDensity(s), footprint * uSurfFoam.z)` draws breaker foam drawn out the way the surf travels, in the same style as the rest of the sea (`waterSurfFoam()` is the older streak pattern). The same formula in JavaScript (`surfHeight` in the demo) adds the surf to the physics height, so things float on the breakers.
+
+**Foam.** `waterFoamMaskStreaks(p, windDir, density, streak, footprint)` turns a foam density (whitecaps from the Jacobian, the foam simulation, swash) and a wind-streak density from `waterWindStreaks()` into an opacity for `waterShade()`. Foam is a sheet of bubbles cut from procedural lace: fresh foam is nearly solid, older foam is a sheet with holes, the oldest is loose threads, and every patch comes apart the same way at its edges. Detail fades out with the pixel footprint, so distant foam keeps its average whiteness and never shimmers. To use a foam texture instead, replace `waterFoamLace()`; it should return values spread evenly over 0..1, high on the bubble walls. `waterFoamMask(p, windDir, density, footprint)` is the same without streaks.
 
 **Tide.** The demo lowers the land by the tide rather than raising the sea (`uTide` in `terrainHeight`), so the sea stays at y = 0 and the reflection plane, the grid and the physics need no changes. In an engine, moving the water plane up does the same job.
 

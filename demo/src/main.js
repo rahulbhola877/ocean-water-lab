@@ -2625,12 +2625,12 @@
     gustDrift[0] += wx * gs * dt; gustDrift[1] += wz * gs * dt;
     var cx = cam.target[0], cz = cam.target[2];
     // spindrift: spray torn off the crests and blown downwind in a gale
-    var sd = state.spindrift * smoothstep(14, 24, state.wind) * dt * 260;
-    for (var i = 0; i < sd; i++) {
-      var a = Math.random() * TAU, r = 6 + Math.random() * 55;
+    var sd = state.spindrift * smoothstep(14, 24, state.wind) * dt * 900;
+    for (var i = 0; i < sd; i++) {                                     // fine spray streaking downwind, low over the crests
+      var a = Math.random() * TAU, r = 8 + Math.random() * 55;
       var x = cx + Math.cos(a) * r - wx * 20, z = cz + Math.sin(a) * r - wz * 20;
       var sp = state.wind * (0.55 + Math.random() * 0.4);
-      emitSpray(x, Math.random() * sea.hs * 0.45, z, wx * sp, 0.5 + Math.random() * 2, wz * sp, 0.35 + Math.random() * 0.9, 1.2 + Math.random() * 1.8, 0.35);
+      emitSpray(x, Math.random() * sea.hs * 0.35, z, wx * sp, 0.3 + Math.random() * 1.2, wz * sp, 0.04 + Math.random() * 0.1, 0.8 + Math.random() * 1.2, 0.45, 0.6);   // small, so they streak
     }
     // underwater: drifting specks catch the light (marine snow)
     if (cam.underwater) for (i = 0; i < dt * 60; i++) {

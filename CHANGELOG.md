@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.0
+
+Foam that looks like foam.
+
+- **Foam is drawn as a sheet of bubbles.** Before, it was either a regular net of threads, which read as a fishing net laid on the sea, or flat white shapes with smooth outlines, like paint. Now a crest that has just broken leaves nearly solid foam with a few holes in it. As it ages the holes grow into lace, then loose threads, and the edge of every patch comes apart the same way. The bubbles come in several sizes with walls of every thickness, all bent by noise, and how full the sheet is varies from patch to patch. Thin foam lets the water show through. Detail fades out with distance before it can shimmer, and far away only the average whiteness is left (kit `waterFoamMask`, new `waterFoamMaskStreaks` and `waterFoamLace`; GLSL and HLSL).
+- **Breaker foam is the same foam,** drawn out the way the surf travels: a white band on the breaking crest, a trail of lace behind it, and a little lace left between the breakers. *Foam scale* and *Foam streaks* under Shore still apply (kit `waterSurfFoamDensity`, `waterSurfFoamPos`; `waterSurfFoam` is kept for hosts that use it).
+- **Wind streaks are part of the foam** instead of a separate stripe pattern. In a gale they are bands of lace along the wind; in a hurricane they crowd together until much of the sea is white. The hurricane scene has more foam (1.0, lasting 3.2 s) and full streaks.
+- **No more round blurry discs in storms.** Spindrift was drawn as large drops that showed as out-of-focus discs near the camera. It is now many small drops that streak in the wind, and spray right in front of the lens fades out.
+- **Reflection 0.8 by default** (0.55 in 1.7.1). With the roughness added in 1.7.1 already blurring reflections on rough water, the lower setting only made the sea dull and dark, the far sea most of all.
+- `tools/gallery.mjs` renders every scene from its own camera after six seconds of simulated time (foam takes a few seconds to build up), for comparing looks before and after a change. `ROOT=<dir>` renders another checkout.
+
 ## 1.7.1
 
 Softer, clearer water: less of a mirror.

@@ -38,11 +38,12 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 
 **Shore**
 - Breaking surf from any depth field: shoaling (Green's law), breaking at a breaker index, crests that lean and throw a lip.
-- Breaker foam that tears into streaks along the direction of travel, with controls for trail, streakiness, scale and lingering foam.
+- Breaker foam drawn out along the direction of travel, with controls for trail, streakiness, scale and lingering foam.
 - Swash and wet sand.
 - Tides: a level, plus a swing and period.
 
 **Foam**
+- Foam drawn as a sheet of bubbles: nearly solid where a crest has just broken, coming apart into lace and loose threads at its edges and as it ages. Filtered by distance, so it never shimmers.
 - Whitecaps calibrated against measured wind coverage.
 - Persistent foam trails, plus a separate long-lived wake channel.
 - Wind streaks, Kelvin wake arms behind boats, and Langmuir slicks (glassy lanes along the wind).

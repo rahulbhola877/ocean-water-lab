@@ -107,14 +107,19 @@ float3 waterShade(float3 N, float3 V, float3 L, float3 sunColor, float3 skyAmbie
     float F = waterFresnel(NdotV, sigma);
     float3 body = waterBody(refraction, thickness, N, V, L, sunColor, skyAmbient, crest, m);
     float3 col = body * (1.0 - F) + reflection * F + waterSunSpecular(N, V, L, sunColor, alpha2) * m.specular;
-    float wrapL = waterSaturate(dot(N, L) * 0.6 + 0.4);
-    float3 foamLit = m.foamColor * (sunColor * (wrapL * waterSaturate(L.y * 4.0 + 0.1) / WATER_PI) + skyAmbient);
+    // foam: a matte, slightly translucent white mass. Thick foam is near white; thin foam takes on the
+    // colour of the water under it and lets its light through; foam on the shadowed side of a wave is darker.
+    float thick = smoothstep(0.15, 0.95, foam);
+    float3 foamAlbedo = m.foamColor * lerp(float3(0.66, 0.78, 0.84), float3(0.9), thick);
+    float wrapL = waterSaturate(dot(N, L) * 0.5 + 0.5);
+    float3 foamLit = foamAlbedo * (sunColor * (wrapL * waterSaturate(L.y * 4.0 + 0.1) / WATER_PI) + skyAmbient * (0.7 + 0.3 * waterSaturate(N.y)));
+    foamLit += body * (1.0 - thick) * 0.6;
     return lerp(col, foamLit, foam);
 }
 
 // ---------------------------------------------------------------------------
-//  Procedural foam texture. Two octaves of cellular noise: bubbles and lace.
-//  Swap for a real foam texture if you have one.
+//  Procedural foam: domain-warped noise for the patches, cellular noise for the lace
+//  at their edges. Swap waterFoamLace() for a real foam texture if you have one.
 // ---------------------------------------------------------------------------
 float2 waterHash22(float2 p) {
     uint2 q = uint2(int2(floor(p)));
@@ -146,52 +151,91 @@ float waterNoise(float2 p) {
     return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
 }
 
-// Foam density 0..1 in, visible foam 0..1 out.
+// Octaves of value noise for foam, roughly 0..1 around 0.5. 'scale' is the frequency of the
+// first octave in cycles per metre; each octave fades to its mean once its features get
+// smaller than about two pixels, so distant foam averages out instead of shimmering.
+float waterFoamFbm(float2 p, float footprint, float scale) {
+    float s = 0.0, norm = 0.0, a = 1.0, f = scale;
+    WATER_LOOP for (int i = 0; i < 4; i++) {
+        float keep = clamp(0.5 / (footprint * f) - 0.5, 0.0, 1.0);
+        s += a * keep * (waterNoise(p * f) - 0.5);
+        norm += a;
+        p = float2(0.8 * p.x - 0.6 * p.y, 0.6 * p.x + 0.8 * p.y) + 13.7;     // turn each octave, so they never line up
+        f *= 2.13; a *= 0.55;
+    }
+    return 0.5 + 1.7 * s / norm;
+}
+
+// Foam lace: the walls between the bubbles of a foam sheet. 1 on a wall, falling to 0 in
+// the middle of a hole and spread fairly evenly in between, so a threshold on it picks out
+// thin threads (high threshold), a sheet with holes (middle) or nearly solid foam (low).
+// Bubbles of several sizes, the large ones 25-45 cm and the small ones about 12 cm,
+// with the mix and the wall thickness changing from place to place, all bent by noise,
+// so it never reads as a net. Returns 0.5, its mean, once the walls are below a pixel.
+float waterFoamLace(float2 q, float footprint) {
+    float w1 = clamp(0.08 / footprint - 0.5, 0.0, 1.0);                   // fades out before the walls get thinner than a pixel
+    if (w1 <= 0.0) return 0.5;
+    float2 bend = float2(waterNoise(q * 1.3 + 4.0), waterNoise(q * 1.3 + 19.0)) - 0.5;
+    bend += (float2(waterNoise(q * 3.1 + 11.0), waterNoise(q * 3.1 + 23.0)) - 0.5) * 0.5;
+    float big = smoothstep(0.3, 0.7, waterNoise(q * 0.45 + 51.0));        // large bubbles in some places, smaller in others
+    float tw = 0.4 + 0.35 * waterNoise(q * 0.7 + 7.0);                    // walls of every thickness
+    float2 ca = waterCells(q * 2.2 + bend * 1.8);
+    float2 cb = waterCells(q * 3.9 + bend * 2.4 + 17.0);
+    float l1 = lerp(1.0 - smoothstep(0.0, tw * 0.9, cb.y - cb.x), 1.0 - smoothstep(0.0, tw, ca.y - ca.x), big);
+    float w2 = clamp(0.025 / footprint - 0.5, 0.0, 1.0);
+    float l2 = 0.5;
+    if (w2 > 0.0) {
+        float2 c2 = waterCells(q * 8.1 + bend * 3.7 + 31.0);
+        l2 = lerp(0.5, 1.0 - smoothstep(0.0, 0.5, c2.y - c2.x), w2);
+    }
+    return lerp(0.5, 0.65 * l1 + 0.35 * l2, w1);
+}
+
+// Foam density 0..1 in, foam opacity 0..1 out, with wind streaks (a density from
+// waterWindStreaks) laid in along the wind.
 //   p          rest position in metres (so the foam rides the waves)
-//   windDir    unit vector; foam is drawn out into streaks along the wind
-//   footprint  metres of sea per pixel; scales smaller than that fade to their mean
-// Foam is a sheet of bubbles with holes in it. Fresh foam is nearly solid; as it
-// ages the holes grow until only threads between them are left, then nothing.
+//   windDir    unit vector; foam is drawn out along it (the wind, or the way surf travels)
+//   footprint  metres of sea per pixel; detail smaller than that fades to its mean
+// Foam is a sheet of bubbles. How full the sheet is comes from the density, varied from
+// patch to patch by domain-warped noise; the sheet is cut from the lace above, so fresh
+// foam is nearly solid with a few holes, older foam is a sheet with holes, and the oldest
+// is loose threads, and the edge of every patch comes apart the same way. Thin foam lets
+// the water show through. Far away only the average whiteness is left, so nothing shimmers.
+float waterFoamMaskStreaks(float2 p, float2 windDir, float density, float streak, float footprint) {
+    float d = max(density, streak);
+    if (d <= 0.01) return 0.0;
+    float2 side = float2(-windDir.y, windDir.x);
+    float2 q = float2(dot(p, windDir) * 0.55, dot(p, side));                       // drawn out along the wind
+    float2 warp = float2(waterFoamFbm(q + 5.2, footprint, 0.16), waterFoamFbm(q + 41.3, footprint, 0.16)) - 0.5;
+    q += warp * 3.2;                                                           // organic, not grid-like
+    float n = waterFoamFbm(q, footprint, 0.5);                                 // patches, 2 m down to 20 cm
+    float C = smoothstep(0.0, 0.75, d);                                        // how full the sheet is, on average
+    float fill = clamp(C + (n - 0.5) * 1.3, 0.0, 1.0);                         // ... and here
+    float lace = waterFoamLace(q * float2(1.4, 1.0), footprint);
+    lace += (waterFoamFbm(q * 1.7 + 77.0, footprint, 2.0) - 0.5) * 0.35;      // ragged, uneven threads
+    float sharp = min(0.06 + 2.5 * footprint, 0.5);                            // edges a pixel or so wide, never stair-stepped
+    float cover = smoothstep(1.0 - fill - sharp, 1.0 - fill + sharp, lace);
+    cover = lerp(cover, fill, smoothstep(0.05, 0.16, footprint));              // bubbles too small to see: just how full
+    cover = lerp(cover, C, smoothstep(0.6, 3.0, footprint));                   // far away, only the average is left
+    return cover * lerp(0.5, 1.0, fill);                                        // thin foam lets the water show through
+}
+
 float waterFoamMask(float2 p, float2 windDir, float density, float footprint) {
-    if (density <= 0.02) return 0.0;
-    float2 q = float2(dot(p, windDir) * 0.45, dot(p, float2(-windDir.y, windDir.x)));     // drawn out along the wind
-    float patches = waterNoise(q * 0.27) * 0.6 + waterNoise(q * 0.71 + 9.0) * 0.4;
-    float d = clamp(density * (0.75 + 0.5 * patches), 0.0, 1.0);
-    float visible = smoothstep(0.02, 0.15, density);
-    float farFoam = smoothstep(0.10, 0.65, d);                                 // too far away to see any structure
-    float wLace = clamp(0.30 / footprint - 0.5, 0.0, 1.0);
-    if (wLace <= 0.0) return farFoam * visible;
-    float wFine = clamp(0.09 / footprint - 0.5, 0.0, 1.0);
-    float2 bend = float2(waterNoise(q * 1.1 + 4.0), waterNoise(q * 1.1 + 19.0)) * 1.8
-              + float2(waterNoise(q * 0.35 + 7.0), waterNoise(q * 0.35 + 11.0)) * 2.6;   // no two holes alike
-    float2 qs = float2(q.x * 0.6, q.y);                                        // holes and threads drawn out further: streaks, not bubbles
-    float2 c1 = waterCells(qs * 2.3 + bend);                                 // x: to the nearest cell centre, y: the next
-    float f2 = wFine > 0.0 ? waterCells(q * 7.9 + bend * 3.0 + 31.0).x : 0.45;
-    float hole = (1.0 - d) * 0.95;                                         // hole radius grows as the foam thins
-    float sheet = smoothstep(hole - 0.10, hole + 0.14, c1.x + 0.45 * (f2 - 0.45) * wFine);
-    // as it ages, what is left lies along the walls between the holes: threads of every
-    // thickness, broken in places, with a finer net in patches; never a regular grid
-    float2 c2 = waterCells(qs * 4.1 + bend * 1.7 + 57.0);
-    float wv = waterNoise(q * 1.3 + 3.0);
-    float w1 = 1.0 - smoothstep(0.02 + 0.3 * d, 0.08 + 0.36 * d, (c1.y - c1.x) / (0.6 + 0.8 * wv));
-    float w2 = 1.0 - smoothstep(0.02 + 0.2 * d, 0.07 + 0.25 * d, c2.y - c2.x);
-    float lacy = smoothstep(0.35, 0.7, waterNoise(q * 0.16 + 41.0) + 0.25 * d);   // lace comes in patches, not everywhere
-    float wall = lacy * max(w1 * smoothstep(0.4, 0.75, wv + 0.3 * d), 0.5 * w2 * smoothstep(0.6, 0.9, waterNoise(q * 0.9 + 21.0) + 0.4 * d));
-    float bubbles = smoothstep(hole * 0.7 - 0.12, hole * 0.7 + 0.16, f2 + 0.12);
-    float nearFoam = max(sheet * smoothstep(0.25, 0.7, d), wall * smoothstep(0.03, 0.2, d)) * lerp(1.0, bubbles, 0.55 * wFine);
-    nearFoam *= lerp(0.55, 1.0, d);                                         // thin old foam lets the water show through
-    return lerp(farFoam * lerp(0.6, 1.0, d), nearFoam, wLace) * visible;
+    return waterFoamMaskStreaks(p, windDir, density, 0.0, footprint);
 }
 
 // Strong wind draws old foam out into long streaks along the wind (Beaufort 7 and up).
-// Returns a foam density to max() into the rest; amount = 0 below ~11 m/s, ~0.6 in a gale.
+// Returns a streak density for waterFoamMaskStreaks(); amount = 0 below ~11 m/s, ~0.6 in a
+// gale, up to 0.9 in a hurricane, where the streaks crowd together until the sea is white.
 float waterWindStreaks(float2 p, float2 windDir, float amount, float footprint) {
     amount *= 1.0 - smoothstep(1.5, 5.0, footprint);
     if (amount <= 0.0) return 0.0;
     float2 q = float2(dot(p, windDir), dot(p, float2(-windDir.y, windDir.x)));
     q.y += 7.0 * waterNoise(q * float2(0.012, 0.06));                        // streaks wander a little
-    float n = waterNoise(q * float2(0.02, 0.6)) * 0.6 + waterNoise(q * float2(0.05, 1.6) + 13.0) * 0.4;
-    return amount * smoothstep(0.58, 0.8, n);
+    float n = waterNoise(q * float2(0.02, 0.6)) * 0.5 + waterNoise(q * float2(0.05, 1.6) + 13.0) * 0.32
+            + waterNoise(q * float2(0.11, 4.3) + 29.0) * 0.18;               // a broad band, and fine lines beside it
+    float lo = 0.66 - 0.18 * amount;
+    return amount * smoothstep(lo, lo + 0.2, n);
 }
 
 // Rain: rings spreading from random drops. Returns a slope to subtract from the

@@ -227,11 +227,12 @@ void main() {
 #ifdef WATER_WEATHER
     foam = max(foam, max(rg.foam, slick.y * 0.65));
 #endif
-    foam = max(foam, waterWindStreaks(restWorld, uWindDir, uWindStreaks, footprint));
     foam = clamp(foam + rippleFoam, 0.0, 1.0);
-    float foamMask = waterFoamMask(restWorld, uWindDir, foam, footprint);
+    float streak = waterWindStreaks(restWorld, uWindDir, uWindStreaks, footprint);
+    float foamMask = waterFoamMaskStreaks(restWorld, uWindDir, foam, streak, footprint);
 #ifdef WATER_SURF
-    foamMask = max(foamMask, waterSurfFoam(restWorld, sf, footprint));       // breakers bring their own streaky foam
+    foamMask = max(foamMask, waterFoamMask(waterSurfFoamPos(restWorld, sf), sf.dir, waterSurfFoamDensity(sf),
+                                           footprint * max(uSurfFoam.z, 0.05)));          // the breakers' foam, drawn out the way they travel
 #endif
 
     // ---- light ----------------------------------------------------------------

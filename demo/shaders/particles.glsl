@@ -66,6 +66,8 @@ void main() {
     vec3 w = aPosSize.xyz + across * (aCorner.x * r) + along * (aCorner.y * half_);
     vQ = aCorner;
     vA = abs(aAlpha) * mix(1.0, r / half_, 0.6);                        // the same water spread over a longer streak
+    float camD = length(uCamPos - aPosSize.xyz);
+    vA *= smoothstep(0.6, 2.0, camD / max(r, 0.05)) * smoothstep(0.4, 1.6, camD);   // nothing smeared across the lens
     vSmoke = step(aAlpha, 0.0);                                         // negative alpha: grey gun smoke
     vSeed = fract(sin(float(gl_InstanceID) * 12.9898 + 1.7) * 43758.5453);
     vStreak = clamp(len / max(half_, 1e-4), 0.0, 1.0);

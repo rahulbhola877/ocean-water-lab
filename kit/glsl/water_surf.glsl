@@ -89,9 +89,27 @@ float waterSurfNoise(vec2 p) {
                mix(waterSurfHash(i + vec2(0.0, 1.0)), waterSurfHash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
-// Foam coverage 0..1 for the surf: a solid band on each breaking crest that tears
-// into streaks along the direction of travel as it is left behind, plus lace
-// lingering between the breakers. footprint: metres of water per pixel.
+// Foam density of the surf, for waterFoamMask() drawn out along s.dir: dense on a breaking
+// crest, thinning along the trail behind it, a little left lying between the breakers.
+float waterSurfFoamDensity(WaterSurf s) {
+    if (s.breaking <= 0.001) return 0.0;
+    float age = smoothstep(0.0, max(uSurfFoam.x, 0.02), s.phase);       // 0 on the crest, 1 at the end of the trail
+    float amount = max(1.0 - age, smoothstep(0.97, 1.0, s.phase)) * s.breaking;
+    return clamp(max(amount, 0.3 * uSurfFoam.w * s.breaking), 0.0, 1.0) * uSurf.w;
+}
+
+// Where to look up the surf foam: scaled by the foam scale (uSurfFoam.z) and drawn out along
+// the direction of travel by the streakiness (uSurfFoam.y; 0.5 leaves it as it is). Use as
+//   waterFoamMask(waterSurfFoamPos(p, s), s.dir, waterSurfFoamDensity(s), footprint * uSurfFoam.z)
+vec2 waterSurfFoamPos(vec2 p, WaterSurf s) {
+    float k = exp2((0.5 - uSurfFoam.y) * 2.5);                       // streakier: longer along the travel
+    p *= max(uSurfFoam.z, 0.05);
+    return p + s.dir * (dot(p, s.dir) * (k - 1.0));
+}
+
+// The older surf foam pattern, kept for hosts that use it directly: coverage 0..1, a solid
+// band on each breaking crest that tears into streaks along the direction of travel as it
+// is left behind, plus lace lingering between the breakers. footprint: metres per pixel.
 float waterSurfFoam(vec2 p, WaterSurf s, float footprint) {
     if (s.breaking <= 0.001) return 0.0;
     float sc = max(uSurfFoam.z, 0.05);
@@ -101,12 +119,12 @@ float waterSurfFoam(vec2 p, WaterSurf s, float footprint) {
     vec2 sd = s.dir * ((0.2 + 3.8 * uSurfFoam.y) / 5.0);
     float n = 0.0;
     for (int k = 0; k < 6; k++) n += waterSurfNoise(q + sd * (float(k) - 2.5));
-    n = clamp((n / 6.0 - 0.5) * mix(1.3, 2.3, uSurfFoam.y) + 0.5, 0.0, 1.0);
+    n = clamp((n / 6.0 - 0.5) * mix(1.1, 1.8, uSurfFoam.y) + 0.5, 0.0, 1.0);
     n = n * 0.8 + waterSurfNoise(q * 4.3 + 3.1) * 0.2;              // bubbles break the edges up
     float ph = s.phase;
     float age = smoothstep(0.0, max(uSurfFoam.x, 0.02), ph);       // 0 on the crest, 1 at the end of the trail
     float amount = max(1.0 - age, smoothstep(0.97, 1.0, ph)) * s.breaking;
-    float soft = 0.05 + footprint * sc * 0.6;
+    float soft = 0.2 + footprint * sc * 0.6;                        // soft edges: foam, not paint
     // fresh foam is dense; as it ages the threshold rises and it tears into streaks
     float thr = mix(0.12, 0.86, pow(1.0 - amount, 0.55));
     float cov = smoothstep(thr, thr + soft, n) * smoothstep(0.0, 0.2, amount);
