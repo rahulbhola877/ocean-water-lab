@@ -1,6 +1,6 @@
 {
   "name": "ocean-water-lab",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "Real-time ocean for games: FFT waves, surf, weather, buoyancy, with GLSL/HLSL/C++/C# sources and an in-browser lab",
   "license": "MIT",
   "type": "module",

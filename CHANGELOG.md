@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.0
+
+A game-style grenade, and spray that looks like water.
+
+- **The grenade is now a big game blast, bigger than life on purpose.** A real grenade throws a few metres of water and hardly moves a crate, which looked weak on screen. It now goes off like this:
+  - a column of white water about 16 to 26 m high, crowned with water flung out in arcs, with thin jets shooting out at a slant
+  - a shockwave racing out over the surface at 55 m/s, turning it white as it passes and throwing everything it reaches into the air: a barrel 5 m off goes up at about 12 m/s, tumbling
+  - the surface heaving into a 3 m dome, a base surge of spray rolling out low over the water, and spray hanging over it all
+  - a hard camera jolt nearby; gas boiling up for a few seconds; big rings of waves; then the column comes down as a downpour over a wide circle
+  - a crack, a deep boom you feel, the roar of the water going up and the downpour coming down
+
+  The kit's `underwaterBlast()` still gives the real figures (they are kept in `thrown.last`); the lab's `GAME` table scales the show built on them.
+- **Spray drawn as clumps of white water.** Spray particles are no longer flat glowing discs. Each is a lumpy clump with ragged edges, shaded like a rough white ball: lit on top, darker underneath, glowing through its thin edges when the sun is behind it. Fast ones are still drawn as streaks. This applies to every splash, wake and spray in the lab.
+- The grenade goes off 1.4 s after it hits the water (about 2 m down), however far it was thrown. Before, a long throw could take longer than the fuse and it went off in the air.
+- Room for 6000 spray particles (was 3000).
+- A limiter after the sound's compressor, so big bangs no longer clip.
+
 ## 1.6.2
 
 The grenade, with the violence of a blast under water.

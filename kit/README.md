@@ -108,6 +108,8 @@ Plain functions of a few numbers, the same in `water_waves.js`, `WaterPhysics.h`
 | `blastPressure(charge, range)`, `blastImpulse(charge, range)` | the shock's peak pressure (Pa) and impulse (Pa s). Impulse times the area of a hull's underside is the shove it gets |
 | `spallSpeed(charge, depth, x)` | how fast the shock throws the surface up, `x` m to the side of the spot over the charge. A light floating thing goes no faster than about half of this |
 
+The lab's grenade is a game-style show built on these numbers and made much bigger on purpose (its `GAME` table); the functions themselves stay physical.
+
 Notes: the cavity takes a fifth of the entry energy; the jet height factor (`0.18 R / (R + 0.03)`) and the plume height fit are tuned by eye, so treat them as approximate. A ripple grid coarser than the real ripples (the demo's is 9 cm) carries waves that are too long, so the demo draws them 2.5 times taller to keep them as steep.
 
 ## Engine notes

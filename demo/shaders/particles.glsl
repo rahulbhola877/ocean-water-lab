@@ -39,7 +39,9 @@ void main() {
     fragColor = vec4(encodeHDR(c * a), 0.0);
 }
 //@@ spray.vert
-// Spray, splashes and wake mist: CPU particles drawn as soft camera-facing discs.
+// Spray, splashes and wake mist: CPU particles drawn as lumpy, lit clumps of white water
+// (ragged edges from noise, shaded as a rough ball under the sun and sky), stretched into
+// streaks along their motion like drops seen in a short exposure.
 layout(location = 0) in vec2 aCorner;   // -1..1
 layout(location = 1) in vec4 aPosSize;  // per instance: world position, radius
 layout(location = 2) in float aAlpha;
@@ -50,35 +52,48 @@ uniform float uEnvMaxLod;
 uniform float uShutter;                 // a drop is drawn as the streak it makes in this time
 out vec2 vQ;
 out float vA;
-out vec3 vLit;
+flat out vec3 vAcross, vAlong, vView, vAmb;
+flat out float vSeed, vSmoke, vStreak;
 void main() {
-    // stretched along its motion across the screen, like a drop seen in a short exposure
     vec3 Vd = normalize(uCamPos - aPosSize.xyz);
     vec3 m = aVel * uShutter;
     m -= Vd * dot(m, Vd);
     float len = length(m), r = aPosSize.w;
     vec3 along = len > 1e-4 ? m / len : uCamUp;
     vec3 across = len > 1e-4 ? normalize(cross(along, Vd)) : uCamRight;
+    if (len <= 1e-4) along = normalize(cross(Vd, across));
     float half_ = r + 0.5 * len;
     vec3 w = aPosSize.xyz + across * (aCorner.x * r) + along * (aCorner.y * half_);
     vQ = aCorner;
     vA = abs(aAlpha) * mix(1.0, r / half_, 0.6);                        // the same water spread over a longer streak
-    float smoke = step(aAlpha, 0.0);                                    // negative alpha: grey gun smoke
-    vec3 V = normalize(uCamPos - aPosSize.xyz);
-    float fwd = pow(max(dot(-V, uSunDir), 0.0), 6.0);                      // bright when backlit
-    float vary = 0.72 + 0.4 * fract(sin(float(gl_InstanceID) * 12.9898) * 43758.5453);   // drops and clumps catch the light differently
-    vLit = 0.85 * vary * (uSunColor * (0.6 * max(uSunDir.y, 0.1) / PI + 0.35 * fwd) + envAmbient(uEnvMaxLod)) * mix(1.0, 0.42, smoke);
+    vSmoke = step(aAlpha, 0.0);                                         // negative alpha: grey gun smoke
+    vSeed = fract(sin(float(gl_InstanceID) * 12.9898 + 1.7) * 43758.5453);
+    vStreak = clamp(len / max(half_, 1e-4), 0.0, 1.0);
+    vAcross = across; vAlong = along; vView = Vd;
+    vAmb = envAmbient(uEnvMaxLod);
     gl_Position = uViewProj * vec4(w, 1.0);
 }
 //@@ spray.frag
 in vec2 vQ;
 in float vA;
-in vec3 vLit;
+flat in vec3 vAcross, vAlong, vView, vAmb;
+flat in float vSeed, vSmoke, vStreak;
 out vec4 fragColor;
 void main() {
     float r2 = dot(vQ, vQ);
     if (r2 > 1.0) discard;
-    float a = (1.0 - r2);
-    a *= a * vA * (0.75 + 0.5 * hash21(gl_FragCoord.xy * 0.7));
-    fragColor = vec4(encodeHDR(vLit) * a, a);
+    vec2 o = vec2(vSeed * 37.0, vSeed * 91.0);
+    float nz = 0.62 * vnoise(vQ * 2.2 + o) + 0.38 * vnoise(vQ * 5.3 - o);
+    float lump = mix(0.55, 0.25, vStreak);                              // streaks stay smooth, clumps break up
+    float dens = (1.0 - r2) * 1.3 + (nz - 0.5) * 2.0 * lump;
+    if (dens <= 0.0) discard;
+    float a = smoothstep(0.0, 0.5, dens) * min(vA, 1.0);
+    // shaded as a rough white ball: a lit top, a darker underside, light through its thin edges
+    float z = sqrt(max(1.0 - r2, 0.0));
+    vec3 N = normalize(vAcross * vQ.x + vAlong * vQ.y + vView * (z + 0.15) + (vec3(nz) - 0.5) * 0.7);
+    float sunLit = max(dot(N, uSunDir), 0.0);
+    float back = pow(max(dot(-vView, uSunDir), 0.0), 5.0) * (1.0 - smoothstep(0.2, 0.9, dens));
+    float alb = mix(0.78, 0.3, vSmoke);
+    vec3 col = alb * (uSunColor * (sunLit * 0.85 + 0.12) / PI + vAmb * (0.55 + 0.45 * clamp(N.y * 0.5 + 0.5, 0.0, 1.0))) + uSunColor * back * 0.25;
+    fragColor = vec4(encodeHDR(col) * a, a);
 }

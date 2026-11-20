@@ -2165,9 +2165,9 @@
     pebble: { mass: 0.025, radius: 0.013, scale: [0.034, 0.022, 0.028], tint: [0.46, 0.43, 0.39] },
     stone: { mass: 0.6, radius: 0.038, scale: [0.11, 0.07, 0.09], tint: [0.34, 0.33, 0.31] },
     skimmer: { mass: 0.1, radius: 0.023, disc: 0.04, attack: 0.35, scale: [0.085, 0.018, 0.075], tint: [0.30, 0.31, 0.30] },
-    grenade: { mass: 0.4, radius: 0.032, scale: [0.064, 0.092, 0.064], tint: [0.20, 0.25, 0.12], fuse: 2.6, charge: 0.2 }
+    grenade: { mass: 0.4, radius: 0.032, scale: [0.064, 0.092, 0.064], tint: [0.20, 0.25, 0.12], fuse: 8, wetFuse: 1.4, charge: 0.2 }   // goes off 1.4 s after it is in the water
   };
-  var throws = [], fx = [], rippleFocus = { x: 0, z: 0, until: -1 }, thrown = { splashes: 0, skips: 0, blasts: 0, last: null };
+  var throws = [], fx = [], rippleFocus = { x: 0, z: 0, until: -1 }, thrown = { splashes: 0, skips: 0, blasts: 0, last: null, kicks: [] };
   function later(t, fn) { fx.push({ at: simTime + t, fn: fn }); }
   function watchSplash(x, z) {                                         // keep the ripple window over the action
     var R = sim && sim.ripple, half = R ? R.size * 0.38 : 18;
@@ -2188,7 +2188,7 @@
       p = [cam.pos[0] + cam.right[0] * 0.6, cam.pos[1] - 0.8, cam.pos[2] + cam.right[2] * 0.6];
       if (cam.underwater || p[1] < 0.5) p[1] = Math.max(surfaceAt(p[0], p[2]) + 1.6, 1.6);
       var dx = at[0] - p[0], dy = at[1] - p[1], dz = at[2] - p[2], dist = Math.hypot(dx, dz);
-      var T = clamp(0.5 + dist / 22, 0.6, 3.5);                        // time of flight: an easy lob near, a long arc far
+      var T = clamp(0.5 + dist / 22, 0.6, d.fuse ? 1.4 : 3.5);           // time of flight: an easy lob near, a long arc far (a grenade goes fast)
       v = [dx / T, dy / T + 0.5 * 9.81 * T, dz / T];
     }
     var th = { type: type, def: d, p: p, v: v, q: qFromAxisAngle(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5, Math.random() * 3),
@@ -2211,6 +2211,7 @@
   function stepThrows(dt) {
     for (var e = fx.length - 1; e >= 0; e--) if (fx[e].at <= simTime) { var job = fx[e]; fx.splice(e, 1); job.fn(); }
     stepDomes(dt);
+    stepRings(dt);
     for (var i = throws.length - 1; i >= 0; i--) {
       var th = throws[i], d = th.def, p = th.p, v = th.v;
       th.t += dt;
@@ -2241,7 +2242,7 @@
         p[0] += v[0] * dt; p[1] += v[1] * dt; p[2] += v[2] * dt;
         var floor = -depthAt(p[0], p[2]) + d.radius;
         if (p[1] < floor) { p[1] = floor; v[1] = 0; th.spin = [0, 0, 0]; }
-        if (d.fuse && th.t >= d.fuse) { blast(p[0], surfaceAt(p[0], p[2]) - p[1], p[2], d.charge); throws.splice(i, 1); continue; }
+        if (d.fuse && (th.t >= d.fuse || th.t - th.wetAt >= d.wetFuse)) { blast(p[0], surfaceAt(p[0], p[2]) - p[1], p[2], d.charge); throws.splice(i, 1); continue; }
         if (!d.fuse && th.t - th.wetAt > 4) { throws.splice(i, 1); continue; }
       }
     }
@@ -2328,93 +2329,122 @@
       if (age > 0 && age - dt < 0.2) addRipple(d.x, d.z, d.R, d.H * (domeEnv(Math.min(age, 0.2)) - domeEnv(Math.max(age - dt, 0))));
     }
   }
+  // The grenade is game-style: much bigger than a real one, on purpose (a real grenade throws a
+  // few metres of water and hardly moves a crate). The kit's underwaterBlast() still gives the
+  // real figures, kept in thrown.last; GAME scales the show built on them.
+  var GAME = { column: 3, minColumn: 16, maxColumn: 26, ringSpeed: 55, ringReach: 40, kick: 20, kickReach: 18 };
+  var rings = [];
+  function stepRings(dt) {
+    for (var i = rings.length - 1; i >= 0; i--) {
+      var g = rings[i], age = simTime - g.t0, r = age * GAME.ringSpeed;
+      if (r > GAME.ringReach) { rings.splice(i, 1); continue; }
+      // the shockwave racing out over the surface: a ring of chopped-up spray
+      var n = Math.round(clamp(r * 1.4, 8, 34) * Math.max(state.spray, 0.4)), fade = 1 - r / GAME.ringReach;
+      for (var fs = 0; fs < 10; fs++) { var fa = (fs + Math.random()) / 10 * TAU; addFoam(g.x + Math.cos(fa) * r, g.z + Math.sin(fa) * r, Math.max(1.4, r * 0.14), 0.7 * fade); }   // the surface it passes over turns white
+      for (var k = 0; k < n; k++) {
+        var a = Math.random() * TAU, rr = r - Math.random() * GAME.ringSpeed * dt;
+        emitSpray(g.x + Math.cos(a) * rr, g.surf + 0.05, g.z + Math.sin(a) * rr, Math.cos(a) * 3, (1 + Math.random() * 3) * (0.4 + fade), Math.sin(a) * 3,
+          0.15 + Math.random() * 0.3 * fade, 0.35 + Math.random() * 0.35, 1.1 * fade + 0.2, 0.8, 3);
+      }
+      // and everything floating is hit as it passes: thrown up and away, set spinning
+      for (var j = 0; j < bodies.length; j++) {
+        var b = bodies[j]; if (g.hit.indexOf(b) >= 0) continue;
+        var rx = b.pos[0] - g.x, rz = b.pos[2] - g.z, d = Math.hypot(rx, rz);
+        if (d > r) continue;
+        g.hit.push(b);
+        var f = Math.pow(Math.max(1 - d / GAME.kickReach, 0), 1.5), dv = GAME.kick * f / Math.pow(1 + b.mass / 2000, 0.35);
+        if (dv < 0.05) continue;
+        var ux = rx / Math.max(d, 0.1), uz = rz / Math.max(d, 0.1), m = b.mass;
+        pushBody(b, [ux * dv * 0.5 * m, dv * m, uz * dv * 0.5 * m], [-ux * b.radius * 0.6 + (Math.random() - 0.5) * b.radius, -b.radius * 0.5, -uz * b.radius * 0.6 + (Math.random() - 0.5) * b.radius], 1);
+        thrown.kicks.push({ d: +d.toFixed(2), dv: +dv.toFixed(2) });
+      }
+    }
+  }
   function blast(x, depth, z, charge) {
     depth = Math.max(depth, 0.2);
-    var bl = Kit.underwaterBlast(charge, depth), surf = surfaceAt(x, z), sp = Math.max(state.spray, 0.35);
-    var v0 = bl.domeSpeed, domeH = clamp(0.125 * v0 * v0 / (2 * 9.81), 0.2, 2.4), domeR = Math.max(1.1 * depth, 1.4 * bl.bubbleRadius, 1.2);
-    thrown.blasts++; thrown.last = bl; bl.domeHeight = domeH; bl.domeR = domeR;
+    var bl = Kit.underwaterBlast(charge, depth), surf = surfaceAt(x, z), sp = Math.max(state.spray, 0.4);
+    var H = clamp(bl.plumeHeight * GAME.column, GAME.minColumn, GAME.maxColumn), R0 = 2.2, domeH = 2.8, domeR = 4.5;
+    thrown.blasts++; thrown.last = bl; thrown.kicks = []; bl.gameColumn = H;
     watchSplash(x, z);
     domes.push({ x: x, z: z, t0: simTime, H: domeH, R: domeR });
     if (domes.length > 6) domes.shift();
-    // the shock: everything floating nearby is kicked up and away. Its impulse on the hull's
-    // underside moves a heavy hull; a light one goes no faster than the water under it is thrown.
-    for (var i = 0; i < bodies.length; i++) {
-      var b = bodies[i], rx = b.pos[0] - x, ry = b.pos[1] - (surf - depth), rz = b.pos[2] - z, R = Math.hypot(rx, ry, rz);
-      if (R > 30) continue;
-      var area = b.def.scale[0] * b.def.scale[2] * 0.8, Jt = Kit.blastImpulse(charge, R) * area;
-      var dv = Math.min(Jt / b.mass, 0.5 * Kit.spallSpeed(charge, depth, Math.hypot(rx, rz)), 9), k = dv * b.mass / R;
-      pushBody(b, [rx * k, ry * k, rz * k], [-rx / R * b.radius * 0.5, -b.radius * 0.4, -rz / R * b.radius * 0.5], 1);
-    }
-    // The shock reaches the surface in milliseconds and, because water barely compresses, it
-    // arrives strong over a wide circle: the surface is torn into fine spray and thrown up at the
-    // spall speed (15 m/s and more over a grenade) wherever that is above about 1.5 m/s. The spray
-    // is fine, so drag stops it within a few metres: a white disc flashes up all at once.
-    var rSpall = 0.5;
-    while (rSpall < 25 && Kit.spallSpeed(charge, depth, rSpall) > 1.5) rSpall += 0.25;
-    bl.spallRadius = rSpall;
-    var nd = Math.round(Math.min(260 + rSpall * 50, 700) * sp);
-    for (var j = 0; j < nd; j++) {
-      var r = rSpall * Math.sqrt(Math.random()), a = Math.random() * TAU, vs = Kit.spallSpeed(charge, depth, r) * (0.75 + 0.35 * Math.random());
-      var lift = domeH * Math.exp(-r * r / (domeR * domeR));
-      emitSpray(x + Math.cos(a) * r, surf + lift * 0.6, z + Math.sin(a) * r, Math.cos(a) * vs * 0.12 * (r / rSpall), vs, Math.sin(a) * vs * 0.12 * (r / rSpall),
-        0.03 + Math.random() * 0.07, 0.7 + Math.random() * 0.8, 1.4, 0.7, 5);
-    }
-    addFoam(x, z, rSpall * 0.75, 1.0);                                 // the torn surface is white
-    addFoam(x, z, domeR * 1.1, 1.0);
-    later(0.05, function () { addFoam(x, z, domeR * 1.1, -0.5); });
+    rings.push({ x: x, z: z, surf: surf, t0: simTime, hit: [] });
     var camR = Math.hypot(x - cam.pos[0], surf - cam.pos[1], z - cam.pos[2]);
-    cam.shake = Math.max(cam.shake || 0, clamp(1.2 / (1 + camR / 6), 0, 0.35));
-    // The gas bubble pushes the dome up and breaks through it: the plume. Its water leaves fast,
-    // 20 to 40 m/s, and the finer it is the sooner drag stops it, so the column is up in a fraction
-    // of a second and then hangs and falls; the heavy water falls back first.
-    later(bl.vents ? 0.02 : 0.06, function () {
-      var H = bl.plumeHeight, R0 = bl.plumeRadius, base = surf + domeH * 0.6, k, f;
-      var vFine = launchSpeed(H, 4), vDrop = launchSpeed(H * 0.85, 1.6);
-      var core = Math.round(380 * sp);
-      for (k = 0; k < core; k++) {                                       // the core: one column, spread out by speed
-        var rc = R0 * 0.6 * Math.sqrt(Math.random()), ac = Math.random() * TAU, heavy = Math.random() < 0.4; f = 0.25 + 0.8 * Math.random();
-        emitSpray(x + Math.cos(ac) * rc, base, z + Math.sin(ac) * rc, Math.cos(ac) * (0.4 + rc), (heavy ? vDrop : vFine) * Math.min(f, 1), Math.sin(ac) * (0.4 + rc),
-          heavy ? 0.12 + Math.random() * 0.14 : 0.08 + Math.random() * 0.18, 1.6 + Math.random() * 1.3, heavy ? 1.1 : 0.8, heavy ? 0.25 : 0.7, heavy ? 1.6 : 4);
+    cam.shake = Math.max(cam.shake || 0, clamp(3 / (1 + camR / 8), 0, 0.7));
+    // the flash: the surface over the charge blown white at once
+    addFoam(x, z, domeR * 1.6, 1.0);
+    addFoam(x, z, domeR, 1.0);
+    for (var j = 0; j < 220 * sp; j++) {
+      var r = domeR * 1.4 * Math.sqrt(Math.random()), a = Math.random() * TAU, up = launchSpeed(2 + 4 * (1 - r / (domeR * 1.4)), 4) * (0.7 + 0.4 * Math.random());
+      emitSpray(x + Math.cos(a) * r, surf + 0.3, z + Math.sin(a) * r, Math.cos(a) * 2, up, Math.sin(a) * 2, 0.2 + Math.random() * 0.4, 0.7 + Math.random() * 0.6, 1.2, 0.8, 4);
+    }
+    // the column: a great mass of white water bursting up, with a crown thrown out at the top
+    later(0.04, function () {
+      var k, f;
+      for (k = 0; k < 900 * sp; k++) {
+        var rc = R0 * Math.sqrt(Math.random()), ac = Math.random() * TAU, heavy = Math.random() < 0.45, kk = heavy ? 1.0 : 2.6;
+        f = 0.15 + 0.9 * Math.random();
+        emitSpray(x + Math.cos(ac) * rc, surf + 0.5, z + Math.sin(ac) * rc, Math.cos(ac) * rc * 0.9, launchSpeed(H * Math.min(f, 1), kk), Math.sin(ac) * rc * 0.9,
+          heavy ? 0.35 + Math.random() * 0.5 : 0.5 + Math.random() * 0.7, 2.6 + Math.random() * 1.6, 1.2, heavy ? 0.4 : 0.9, kk);
       }
-      var spikes = 14 + Math.floor(Math.random() * 6);
-      for (var j2 = 0; j2 < spikes; j2++) {                              // jets thrown out at a slant, each a streak of drops
-        var az = (j2 + Math.random() * 0.7) / spikes * TAU, el = (48 + Math.random() * 38) * DEG, sj = launchSpeed(H * (0.5 + 0.55 * Math.random()), 2.4);
-        var ux = Math.cos(az) * Math.cos(el), uz = Math.sin(az) * Math.cos(el), uy = Math.sin(el), m = Math.round((24 + Math.random() * 14) * sp);
+      for (k = 0; k < 450 * sp; k++) {                                  // the crown: water flung out and over in arcs
+        var az = Math.random() * TAU, tilt = (6 + Math.random() * 24) * DEG, v = launchSpeed(H * (0.75 + 0.25 * Math.random()), 1.6);
+        emitSpray(x + Math.cos(az) * R0 * 0.5, surf + 0.5, z + Math.sin(az) * R0 * 0.5, Math.cos(az) * Math.sin(tilt) * v, Math.cos(tilt) * v, Math.sin(az) * Math.sin(tilt) * v,
+          0.3 + Math.random() * 0.4, 2.8 + Math.random() * 1.4, 1.1, 0.6, 1.6);
+      }
+      var spikes = 12 + Math.floor(Math.random() * 6);
+      for (var s2 = 0; s2 < spikes; s2++) {                              // thin jets shooting out at a slant
+        var az2 = Math.random() * TAU, el = (40 + Math.random() * 45) * DEG, sj = launchSpeed(H * (0.4 + 0.5 * Math.random()), 2);
+        var ux = Math.cos(az2) * Math.cos(el), uz = Math.sin(az2) * Math.cos(el), uy = Math.sin(el), m = Math.round(48 * sp);
         for (k = 0; k < m; k++) {
-          f = 0.3 + 0.7 * (k / m) + 0.05 * Math.random();
-          emitSpray(x + ux * R0 * 0.7, base, z + uz * R0 * 0.7, ux * sj * f + (Math.random() - 0.5) * 0.6, uy * sj * f, uz * sj * f + (Math.random() - 0.5) * 0.6,
-            0.05 + Math.random() * 0.1, 1.5 + Math.random() * 1.2, 1.4, 0.3, 2.4);
+          f = 0.25 + 0.75 * (k / m) + 0.02 * Math.random();
+          emitSpray(x + ux * R0, surf + 0.4, z + uz * R0, ux * sj * f, uy * sj * f, uz * sj * f, 0.07 + Math.random() * 0.08, 1.6 + Math.random() * 1.0, 1.5, 0.2, 2);
         }
       }
-      var skirt = Math.round(120 * sp);
-      for (k = 0; k < skirt; k++) {                                      // the base surge: water thrown out low around the foot
-        var as = Math.random() * TAU, vo = 4 + Math.random() * 7;
-        emitSpray(x + Math.cos(as) * R0, surf + 0.2, z + Math.sin(as) * R0, Math.cos(as) * vo, 1.5 + Math.random() * 3.5, Math.sin(as) * vo,
-          0.1 + Math.random() * 0.2, 0.8 + Math.random() * 0.8, 1.0, 0.8, 2.2);
-      }
-      for (k = 0; k < 28 * sp; k++) {                                    // mist that hangs after it
-        var am = Math.random() * TAU, rm = R0 * 1.8 * Math.random();
-        emitSpray(x + Math.cos(am) * rm, surf + H * 0.35 * Math.random(), z + Math.sin(am) * rm, Math.cos(am) * 1.2, 0.8 + Math.random() * 2.5, Math.sin(am) * 1.2, 0.9 + Math.random() * 1.1, 3 + Math.random() * 2, 0.3);
+    });
+    // the base surge: a white cloud of spray rolling out low over the water
+    later(0.18, function () {
+      for (var k = 0; k < 200 * sp; k++) {
+        var a2 = Math.random() * TAU, vo = 7 + Math.random() * 8;
+        emitSpray(x + Math.cos(a2) * R0, surf + 0.4 + Math.random(), z + Math.sin(a2) * R0, Math.cos(a2) * vo, 0.5 + Math.random() * 2.5, Math.sin(a2) * vo,
+          0.9 + Math.random() * 1.2, 2.2 + Math.random() * 1.4, 0.3, 1.4, 1.1);
       }
     });
-    // the gas bubble collapses under the dome: the hollow left behind rings out as more waves
-    later(bl.bubblePeriod + 0.3, function () { addRipple(x, z, domeR * 0.8, -0.45 * domeH); });
-    later(bl.bubblePeriod + 0.75, function () { addRipple(x, z, domeR * 0.7, 0.25 * domeH); });
-    // the column falls back: a wide patch of white water and a rain of splashes
-    var back = 2 * Math.sqrt(2 * bl.plumeHeight / 9.81) * 0.8;
-    later(back * 0.7, function () {
-      addFoam(x, z, bl.plumeRadius * 2 + domeR, -0.55);
-      for (var m = 0; m < 26; m++) later(Math.random() * 1.1, function () {   // the water coming down pocks the surface
-        var a2 = Math.random() * TAU, r2 = (bl.plumeRadius * 2.5 + domeR) * Math.sqrt(Math.random()), px2 = x + Math.cos(a2) * r2, pz2 = z + Math.sin(a2) * r2;
-        addRipple(px2, pz2, 0.3, -0.1);
-        for (var q = 0; q < 3; q++) emitSpray(px2, surf + 0.05, pz2, (Math.random() - 0.5) * 1.5, 1 + Math.random() * 2, (Math.random() - 0.5) * 1.5, 0.04 + Math.random() * 0.05, 0.4 + Math.random() * 0.3, 0.8, 0.2);
+    later(0.5, function () {                                           // spray that hangs over it all
+      for (var k = 0; k < 50 * sp; k++) {
+        var a3 = Math.random() * TAU, r3 = 6 * Math.random();
+        emitSpray(x + Math.cos(a3) * r3, surf + H * (0.2 + 0.6 * Math.random()), z + Math.sin(a3) * r3, Math.cos(a3) * 1.5, 0.3 + Math.random(), Math.sin(a3) * 1.5,
+          2.5 + Math.random() * 2.5, 5 + Math.random() * 2, 0.3, 1.2, 0.8);
+      }
+    });
+    // the hole it leaves falls in and rings out as big waves
+    later(0.6, function () { addRipple(x, z, domeR * 0.8, -2.2); });
+    later(1.1, function () { addRipple(x, z, domeR * 0.7, 1.3); });
+    later(1.6, function () { addRipple(x, z, domeR * 0.6, -0.6); });
+    // gas bubbles boiling up for a few seconds
+    for (var bb = 0; bb < 20; bb++) later(0.9 + bb * 0.15, function () {
+      var a4 = Math.random() * TAU, r4 = 2.5 * Math.sqrt(Math.random()), px = x + Math.cos(a4) * r4, pz = z + Math.sin(a4) * r4;
+      addFoam(px, pz, 0.9, 0.6); addRipple(px, pz, 0.35, 0.12);
+      for (var q = 0; q < 5; q++) emitSpray(px, surf + 0.05, pz, (Math.random() - 0.5) * 1.2, 1 + Math.random() * 2, (Math.random() - 0.5) * 1.2, 0.08 + Math.random() * 0.1, 0.5, 1, 0.3, 1.4);
+    });
+    // the column comes down: a downpour over a wide circle, and a big patch of white water
+    var back = Math.sqrt(2 * H / 9.81) + 0.9;
+    later(back, function () {
+      addFoam(x, z, 9, -1.0); addFoam(x, z, 5, -1.0);
+      for (var m2 = 0; m2 < 40; m2++) later(Math.random() * 1.6, function () {
+        var a5 = Math.random() * TAU, r5 = 11 * Math.sqrt(Math.random()), px = x + Math.cos(a5) * r5, pz = z + Math.sin(a5) * r5;
+        addRipple(px, pz, 0.35, -0.12);
+        for (var q2 = 0; q2 < 4; q2++) emitSpray(px, surf + 0.05, pz, (Math.random() - 0.5) * 2, 1.5 + Math.random() * 3, (Math.random() - 0.5) * 2, 0.08 + Math.random() * 0.1, 0.5 + Math.random() * 0.3, 1, 0.3, 1.4);
       });
     });
-    var dist = Math.hypot(x - cam.pos[0], surf - cam.pos[1], z - cam.pos[2]), del = dist / 343, g = clamp(1.9 - dist / 250, 0.25, 1.8);
-    oneShot('brown', 'lowpass', 85, g * 1.4, 0.004, 1.1, del, 0.55);              // the thump through the water and the hull
-    oneShot('brown', 'lowpass', 260, g * 0.8, 0.003, 0.35, del, 0.9);
-    oneShot('white', 'bandpass', 650, g * 0.6, 0.12, 2.2, del + 0.1);              // the plume going up
-    oneShot('pink', 'highpass', 1700, g * 0.45, 0.4, 1.8, del + back * 0.7);         // and coming down
+    // the sound: a crack, a deep boom you feel, the water roaring up, then the downpour
+    var del = camR / 343, g = clamp(2.2 - camR / 200, 0.4, 2.2);
+    oneShot('white', 'highpass', 1800, g * 0.7, 0.001, 0.12, del);
+    oneShot('tone', 'sine', 62, g * 1.2, 0.004, 1.9, del, 26);
+    oneShot('brown', 'lowpass', 150, g * 1.5, 0.004, 2.6, del, 0.6);
+    oneShot('brown', 'lowpass', 55, g * 1.1, 0.05, 4.5, del + 0.05, 0.5);
+    oneShot('white', 'bandpass', 520, g * 0.9, 0.06, 2.8, del + 0.04);
+    oneShot('pink', 'highpass', 1100, g * 0.7, 0.6, 3.4, del + back - 0.4);
   }
   function airBurst(p) {                                              // the fuse ran out before it reached the water
     for (var k = 0; k < 60; k++) emitSpray(p[0], p[1], p[2], (Math.random() - 0.5) * 6, (Math.random() - 0.3) * 4, (Math.random() - 0.5) * 6, 0.5 + Math.random() * 0.9, 1.8 + Math.random() * 2, -0.8);
@@ -2440,7 +2470,7 @@
   // ===========================================================================
   //  particles: spray and splashes (CPU), rain (GPU, from the instance id)
   // ===========================================================================
-  var PMAX = 3000, PS = 12, IS = 8, part = { n: 0, x: new Float32Array(PMAX * PS), inst: new Float32Array(PMAX * IS), vao: null, ib: null, quad: null, rainVao: null };
+  var PMAX = 6000, PS = 12, IS = 8, part = { n: 0, x: new Float32Array(PMAX * PS), inst: new Float32Array(PMAX * IS), vao: null, ib: null, quad: null, rainVao: null };
   // grow: how much a puff swells over its life (spray 1.6; drops of water hardly at all)
   // drag: 1/s; fine spray stalls within metres (4-6), big drops carry (about 1)
   function emitSpray(x, y, z, vx, vy, vz, size, life, alpha, grow, drag) {
@@ -2503,7 +2533,7 @@
         I[q + 5] = X[o + 3]; I[q + 6] = X[o + 4]; I[q + 7] = X[o + 5];
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, part.ib); gl.bufferSubData(gl.ARRAY_BUFFER, 0, I.subarray(0, part.n * IS));
-      setFrame(prog.spray.use()).m4('uViewProj', cam.viewProj).v3('uCamRight', cam.right).v3('uCamUp', cam.up).f('uShutter', 1 / 50);
+      setFrame(prog.spray.use()).m4('uViewProj', cam.viewProj).v3('uCamRight', cam.right).v3('uCamUp', cam.up).f('uShutter', 1 / 30);
       gl.bindVertexArray(part.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, part.n);
     }
@@ -2708,7 +2738,8 @@
     n.master = ctx.createGain(); n.master.gain.value = 0.9;
     n.under = ctx.createBiquadFilter(); n.under.type = 'lowpass'; n.under.frequency.value = 18000;
     n.comp = ctx.createDynamicsCompressor(); n.comp.threshold.value = -16; n.comp.ratio.value = 3;
-    n.master.connect(n.under); n.under.connect(n.comp); n.comp.connect(ctx.destination);
+    n.limit = ctx.createDynamicsCompressor(); n.limit.threshold.value = -2; n.limit.knee.value = 0; n.limit.ratio.value = 20; n.limit.attack.value = 0.002; n.limit.release.value = 0.15;   // big bangs, no clipping
+    n.master.connect(n.under); n.under.connect(n.comp); n.comp.connect(n.limit); n.limit.connect(ctx.destination);
     function bed(buf, type, freq, q) {
       var s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.loopStart = Math.random();
       var f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q || 0.7;

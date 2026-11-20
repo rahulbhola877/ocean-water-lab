@@ -68,7 +68,7 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - Throw things in (pick one under *Click the water to drop or throw*, then click the sea; T throws at the middle of the view):
   - a **pebble** or **stone** opens a cavity, throws up a crown of drops and a Worthington jet, plops, and sends rings across the water
   - a **skimming stone** skips when it meets the water flat and fast enough (Clanet, Hersen and Bocquet 2004), leaving a line of rings, then sinks
-  - a **grenade** sinks and goes off: the shock tears a wide circle of the surface into spray all at once (water carries it much further than air would), the water heaves into a dome that runs out as waves, a plume of jets bursts up in a fraction of a second, and everything floating nearby gets shoved (Cole's similitude laws)
+  - a **grenade** sinks and goes off as a big game-style blast, bigger than a real one on purpose: a shockwave races out over the surface and throws everything it reaches into the air, a column of white water some 20 m high bursts up, a base surge rolls out, and it all comes down as a downpour. The kit's functions still give the real numbers (Cole's similitude laws)
 - A planing speedboat, and a square-rigger that sails by the apparent wind (and reefs in a blow) and fires cannons.
 
 **Sound**
