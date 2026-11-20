@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.2
+
+The grenade, with the violence of a blast under water.
+
+- **The shock arrives strong over a wide circle.** Water barely compresses, so an underwater blast carries its pressure much further than one in air. The surface is torn into spray wherever the shock throws it up faster than 1.5 m/s: about 6 m around for a grenade 2.4 m down, at 15 m/s over the charge. It flashes up white all at once.
+- **A plume that bursts.** Its water leaves at 20 to 40 m/s and drag on the fine spray stops it within metres, so the column is up in a fraction of a second, then hangs and falls, the heavy water first. Spray particles now each have their own drag: fine spray stalls, big drops carry. A base surge of water is thrown out low around its foot, and the falling water pocks the surface.
+- **A jolt.** The camera shakes when a blast goes off close by.
+- Test clips can now take the lab's own sound with them (`soundTrack()` in the test hook).
+
 ## 1.6.1
 
 The grenade, reworked.
