@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.1
+
+Softer, clearer water: less of a mirror.
+
+- **The sea was too smooth.** The FFT sea gave the ripples too small for its cascades only a fifth of the slope that Cox and Munk measured on real seas, so it read as polished metal. It now gives them 60 % of it (kit `water_fft.js`, `baseRoughness2`; the analytic sea likewise).
+- **All of that roughness dulls the reflection.** The rough-sea Fresnel correction (Bruneton et al.) and the reflection direction now use every unresolved slope, the base ripples included, not just what the wave LOD filtered out (kit `water_shading.glsl`, `ocean.frag`; HLSL regenerated). The sky reflection is blurred more on rough water, so clouds no longer show in it as sharp shapes.
+- **Reflection 0.55 by default** (was the physical 1), and a little more blue light scattered up out of the water (`ocean` 0.03, `navy` 0.02), so the water's own colour shows through. Raise *Reflection* under Optics for the old look.
+
 ## 1.7.0
 
 A game-style grenade, and spray that looks like water.

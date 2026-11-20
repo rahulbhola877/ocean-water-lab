@@ -37,11 +37,11 @@
     ['absG', 'optics', 'Absorb green', 0.005, 0.8, 0.001, 0.085, 'pm'],
     ['absB', 'optics', 'Absorb blue', 0.005, 0.8, 0.001, 0.05, 'pm'],
     ['scatterCol', 'optics', 'Scatter colour', 0, 0, 0, '#0e62ff', 'color'],
-    ['scatterAmt', 'optics', 'Scatter amount', 0, 0.15, 0.0005, 0.022, 'f3'],
+    ['scatterAmt', 'optics', 'Scatter amount', 0, 0.15, 0.0005, 0.03, 'f3'],
     ['sssCol', 'optics', 'Crest glow colour', 0, 0, 0, '#05574c', 'color'],
     ['sss', 'optics', 'Crest glow', 0, 4, 0.05, 1, 'x'],
     ['rough', 'optics', 'Roughness', 0.2, 4, 0.01, 1, 'x'],
-    ['reflect', 'optics', 'Reflection', 0, 1.5, 0.01, 1, 'x'],
+    ['reflect', 'optics', 'Reflection', 0, 1.5, 0.01, 0.55, 'x'],   // below the physical 1: a softer, clearer sea that reads less like a mirror
     ['spec', 'optics', 'Sun glitter', 0, 4, 0.05, 1, 'x'],
     ['refract', 'optics', 'Refraction bend', 0, 4, 0.05, 1, 'x'],
     ['caustics', 'optics', 'Caustics', 0, 4, 0.05, 1, 'x'],
@@ -130,12 +130,12 @@
 
   // water bodies: absorption per metre, scatter colour x amount, crest glow colour
   var LOOKS = {
-    ocean: { absR: 0.42, absG: 0.085, absB: 0.05, scatterCol: '#0e62ff', scatterAmt: 0.022, sssCol: '#05574c', sss: 1.0 },
+    ocean: { absR: 0.42, absG: 0.085, absB: 0.05, scatterCol: '#0e62ff', scatterAmt: 0.03, sssCol: '#05574c', sss: 1.0 },
     lagoon: { absR: 0.32, absG: 0.055, absB: 0.045, scatterCol: '#0ec8ff', scatterAmt: 0.07, sssCol: '#0fccad', sss: 1.1 },
     coast: { absR: 0.55, absG: 0.22, absB: 0.38, scatterCol: '#66ff99', scatterAmt: 0.04, sssCol: '#33993d', sss: 0.8 },
     tropical: { absR: 0.30, absG: 0.042, absB: 0.035, scatterCol: '#14dcff', scatterAmt: 0.085, sssCol: '#1ae6c8', sss: 1.35 },
     emerald: { absR: 0.50, absG: 0.11, absB: 0.16, scatterCol: '#2aff9a', scatterAmt: 0.05, sssCol: '#3cff9e', sss: 2.2 },
-    navy: { absR: 0.46, absG: 0.11, absB: 0.06, scatterCol: '#0a3cff', scatterAmt: 0.012, sssCol: '#0a4a66', sss: 0.8 },
+    navy: { absR: 0.46, absG: 0.11, absB: 0.06, scatterCol: '#0a3cff', scatterAmt: 0.02, sssCol: '#0a4a66', sss: 0.8 },
     surfwater: { absR: 0.34, absG: 0.05, absB: 0.06, scatterCol: '#1ec8d8', scatterAmt: 0.05, sssCol: '#28e0b4', sss: 1.5 }
   };
 

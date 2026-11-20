@@ -94,8 +94,8 @@ vec3 waterBody(vec3 refraction, float thickness, vec3 N, vec3 V, vec3 L,
 vec3 waterShade(vec3 N, vec3 V, vec3 L, vec3 sunColor, vec3 skyAmbient,
                 vec3 reflection, vec3 refraction, float thickness,
                 float crest, float foam, float lostSlopeVariance, WaterMaterial m) {
-    float sigma = sqrt(max(lostSlopeVariance, 0.0));
     float alpha2 = waterAlpha2(m.roughness, lostSlopeVariance);
+    float sigma = sqrt(alpha2);                    // every unresolved slope, the base ripples included, dulls the mirror
     float NdotV = max(dot(N, V), 1e-3);
     float F = waterFresnel(NdotV, sigma);
     vec3 body = waterBody(refraction, thickness, N, V, L, sunColor, skyAmbient, crest, m);

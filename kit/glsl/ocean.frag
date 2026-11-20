@@ -170,10 +170,10 @@ void main() {
     vec3 refraction = decodeHDR(textureLod(uSceneColor, ruv2, 0.0).rgb);
 
     // ---- reflection -----------------------------------------------------------
-    float sigma = sqrt(wd.lostVar);
-    float alpha = sqrt(waterAlpha2(uRoughness, wd.lostVar));
+    float alpha = sqrt(waterAlpha2(mat.roughness, wd.lostVar));
+    float sigma = alpha;                                                    // the ripples too small to draw blur the reflection too
     vec3 R = waterReflectDir(N, V, sigma);
-    vec3 reflection = sampleEnv(R, clamp(alpha * 9.0, 0.0, uEnvMaxLod - 3.0));
+    vec3 reflection = sampleEnv(R, clamp(alpha * 12.0, 0.0, uEnvMaxLod - 2.0));   // a rough sea shows the sky blurred, not its clouds
 #ifdef WATER_PLANAR
     // Nearby objects and the coast, from a render mirrored in the sea plane. A point
     // P + R t on the reflected ray appears where the camera sees its mirror image.

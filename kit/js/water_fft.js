@@ -157,7 +157,9 @@
       windStreaks: 0.6 * ws2 * ws2 * (3 - 2 * ws2) * Math.min(p.foamAmount, 1.5),
       coverage: coverage,                       // whitecap fraction asked for (calibrateFoam measures against it)
       meanSquareSlope: mssTotal,
-      baseRoughness2: Math.min(Math.max((mssCoxMunk - mssTotal) * 0.2, 0.0004), 0.012)
+      // the slopes of the ripples too small for the cascades: most of what Cox & Munk (1954) measured
+      // beyond them. Too little and the sea reads as a polished mirror; all of it blurs the waves away.
+      baseRoughness2: Math.min(Math.max((mssCoxMunk - mssTotal) * 0.6, 0.0008), 0.035)
     };
   }
 

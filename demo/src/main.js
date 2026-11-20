@@ -419,7 +419,7 @@
     } else {
       sea.hs = waves.significantHeight; sea.tp = waves.peakPeriod; sea.lp = waves.peakWavelength;
       sea.foamThreshold = waves.foamThreshold; sea.foamGain = waves.foamGain; sea.windStreaks = waves.windStreaks;
-      sea.baseRough2 = Math.pow(0.035, 2);
+      sea.baseRough2 = clamp((0.003 + 0.00512 * state.wind - 0.012) * 0.6, 0.0008, 0.035);   // most of Cox & Munk beyond what the analytic waves draw
     }
   }
 
