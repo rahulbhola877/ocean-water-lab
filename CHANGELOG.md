@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.0
+
+A more natural sea. I looked at how real seas look and how recent games, films and papers render them, and changed what still looked made up.
+
+- **Sun glitter flashes.** Most glitter comes from single capillary ripples catching the sun (Lynch, Dearborn and Lock, 2011): each one either sends the sun's image to the eye or does not. Close up the glitter now breaks into single ripples that flash on and off, dense in the glitter path and thinning out into stray sparkles around it, with the same average brightness as before, so the far sea still settles into a smooth sheen (kit `waterGlints`, `waterGlintChance`).
+- **Bubble clouds under the foam.** A breaking crest drives bubbles a metre or two down, and they light the water up from inside, so whitecaps and breakers now sit in a pale turquoise or green patch, as in real footage (the `bubbles` input of `waterShadeFoam`).
+- **Natural water colours.** The scenes had been tuned after the saturated looks of particular games. Their water now follows how sea water absorbs and scatters light: deep water is a deep blue, or slate green where there is plankton, and turquoise appears only where light comes back off a shallow, light sea bed. Saturation boosts in the grades are mostly gone, and Golden Coast is a little less orange.
+- **Old foam is a cluster of bubbles,** not star-shaped threads, and thick foam's streaks are shorter and softer, so it no longer reads as brush strokes. Seen from high above, foam keeps holes up to 80 cm across instead of smoothing into wisps, and it swirls less. Breakers on Big Surf are drawn out a little less.
+- **Slicks** (glassy lanes along the wind where surface films damp the ripples) are on in the calm and moderate scenes, which breaks up the too-even surface of a calm sea. They gather fewer foam lines than before.
+- `waterShadeFoam` takes two new inputs, `bubbles` and `glints`, after `foamShade` (GLSL and HLSL). `waterShade` is unchanged.
+
 ## 1.9.0
 
 A closer look. Every scene was checked up close, low over the water, from above, behind a boat and under the surface, and what did not look natural was fixed.

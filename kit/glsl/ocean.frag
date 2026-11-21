@@ -225,15 +225,18 @@ void main() {
 #endif
     }
 #ifdef WATER_WEATHER
-    foam = max(foam, max(rg.foam, slick.y * 0.65));
+    foam = max(foam, max(rg.foam, slick.y * 0.35));
 #endif
     foam = clamp(foam + rippleFoam, 0.0, 1.0);
     float streak = waterWindStreaks(restWorld, uWindDir, uWindStreaks, footprint);
     WaterFoam fl = waterFoamLayer(restWorld, uWindDir, foam, streak, footprint);
+    float bubbles = foam;                                                    // bubble clouds under the foam, for the water's colour
 #ifdef WATER_SURF
-    WaterFoam fs = waterFoamLayer(waterSurfFoamPos(restWorld, sf), sf.dir, waterSurfFoamDensity(sf), 0.0,
+    float surfDensity = waterSurfFoamDensity(sf);
+    WaterFoam fs = waterFoamLayer(waterSurfFoamPos(restWorld, sf), sf.dir, surfDensity, 0.0,
                                   footprint * max(uSurfFoam.z, 0.05));                    // the breakers' foam, drawn out the way they travel
     if (fs.cover > fl.cover) fl = fs;
+    bubbles = max(bubbles, surfDensity);
 #endif
     float foamMask = fl.cover;
     vec3 foamN = waterBumpNormal(N, dFdx(vWorld), dFdy(vWorld), dFdx(fl.height), dFdy(fl.height));   // foam lit with its own lumps
@@ -241,8 +244,9 @@ void main() {
     // ---- light ----------------------------------------------------------------
     float crest = clamp(vHeight / (0.6 * uWaveHs + 0.05) + 0.2, 0.0, 1.0);
     vec3 sunLit = uSunColor * WATER_SUN_SHADOW(vWorld);
+    float glints = waterGlints(restWorld, footprint, uTime, waterGlintChance(N, V, uSunDir, alpha * alpha));   // the glitter breaks into single flashing ripples
     vec3 col = waterShadeFoam(N, foamN, V, uSunDir, sunLit, skyAmbient, reflection, refraction,
-                              thickness, crest, foamMask, fl.shade, wd.lostVar, mat);
+                              thickness, crest, foamMask, fl.shade, bubbles, glints, wd.lostVar, mat);
 #ifdef WATER_WEATHER
     col += uBio * foamMask * (0.55 + 0.45 * waterWeatherNoise(restWorld * 3.0 + uTime * 2.0));   // plankton lit by the churn
     if (uFlashLight.w > 0.0) {                                                    // the strike lights crests and foam on its side

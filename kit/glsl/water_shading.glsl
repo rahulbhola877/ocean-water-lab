@@ -93,15 +93,22 @@ vec3 waterBody(vec3 refraction, float thickness, vec3 N, vec3 V, vec3 L,
 //   foam        0..1 coverage after the foam pattern has been applied
 //   foamN       the normal the foam is lit with: N bumped by WaterFoam.height (waterBumpNormal), or N
 //   foamShade   how much light the foam's own surface catches (WaterFoam.shade; 1 = flat)
+//   bubbles     0..1, clouds of bubbles under the surface where foam is or was a moment ago (the
+//               foam density before the foam pattern is applied); they light the water up from
+//               inside, so whitecaps and breakers sit in a pale turquoise or green patch
+//   glints      multiplier on the sun glitter, waterGlints(), or 1 for the smooth average
 vec3 waterShadeFoam(vec3 N, vec3 foamN, vec3 V, vec3 L, vec3 sunColor, vec3 skyAmbient,
                     vec3 reflection, vec3 refraction, float thickness,
-                    float crest, float foam, float foamShade, float lostSlopeVariance, WaterMaterial m) {
+                    float crest, float foam, float foamShade, float bubbles, float glints, float lostSlopeVariance, WaterMaterial m) {
     float alpha2 = waterAlpha2(m.roughness, lostSlopeVariance);
     float sigma = sqrt(alpha2);                    // every unresolved slope, the base ripples included, dulls the mirror
     float NdotV = max(dot(N, V), 1e-3);
     float F = waterFresnel(NdotV, sigma);
     vec3 body = waterBody(refraction, thickness, N, V, L, sunColor, skyAmbient, crest, m);
-    vec3 col = body * (1.0 - F) + reflection * F + waterSunSpecular(N, V, L, sunColor, alpha2) * m.specular;
+    // a bubble plume reaches a metre or two down: the light it scatters back has crossed
+    // 2-3 m of water, so it comes back tinted by the water's own colour
+    body += (sunColor * (max(L.y, 0.0) / WATER_PI) + skyAmbient) * exp(-m.extinction * 2.5) * (0.15 * waterSaturate(bubbles));
+    vec3 col = body * (1.0 - F) + reflection * F + min(waterSunSpecular(N, V, L, sunColor, alpha2) * (m.specular * glints), vec3(250.0));
     // foam: a matte, slightly translucent white mass that stands a little proud of the water. Thick foam
     // is near white; thin foam takes on the colour of the water under it and lets its light through;
     // foam on the shadowed side of a wave or of its own lumps is darker, and so are its hollows.
@@ -116,7 +123,7 @@ vec3 waterShadeFoam(vec3 N, vec3 foamN, vec3 V, vec3 L, vec3 sunColor, vec3 skyA
 vec3 waterShade(vec3 N, vec3 V, vec3 L, vec3 sunColor, vec3 skyAmbient,
                 vec3 reflection, vec3 refraction, float thickness,
                 float crest, float foam, float lostSlopeVariance, WaterMaterial m) {
-    return waterShadeFoam(N, N, V, L, sunColor, skyAmbient, reflection, refraction, thickness, crest, foam, 1.0, lostSlopeVariance, m);
+    return waterShadeFoam(N, N, V, L, sunColor, skyAmbient, reflection, refraction, thickness, crest, foam, 1.0, 0.0, 1.0, lostSlopeVariance, m);
 }
 
 // A normal bumped by a height field, from screen-space derivatives (Mikkelsen 2010, "Bump
@@ -178,17 +185,61 @@ float waterFoamFbm(vec2 p, float footprint, float scale) {
     return 0.5 + 1.7 * s / norm;
 }
 
+// Sun glints. The GGX lobe is the average over many ripples, but most glitter comes from
+// single capillary ripples catching the sun (Lynch, Dearborn & Lock 2011): each one either
+// sends the sun's image to the eye or does not. Where the lobe is strong many ripples do,
+// out in its tail only a few, each just as bright, so the glitter path is dense with flashes
+// and thins out into stray sparkles around it. waterGlints() returns a multiplier for the sun
+// specular whose mean is 1, so far away, where every pixel covers thousands of ripples, the
+// smooth average is left.
+//   p          rest position in metres (glints ride the waves)
+//   footprint  metres of sea per pixel
+//   chance     waterGlintChance(): the lobe here relative to its peak
+float waterGlintChance(vec3 N, vec3 V, vec3 L, float alpha2) {
+    float NdotH = waterSaturate(dot(N, normalize(V + L)));
+    float r = alpha2 / (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
+    return r * r;
+}
+
+float waterGlintSites(vec2 p, float cell, float time, float chance) {
+    vec2 g = p / cell, c = floor(g), f = g - c;
+    vec2 h = waterHash22(c);
+    float phase = time * (4.0 + 4.0 * h.x) + h.y;           // each site flashes at its own rate
+    float cyc = floor(phase);
+    float pr = waterSaturate(chance * 3.0);                    // the share of ripples here facing the right way
+    float u = waterHash22(c + cyc * 5.31 + 91.0).x;
+    if (u >= pr) return 0.0;
+    vec2 r = waterHash22(c + cyc * 23.17 + 7.0);             // each flash is a new ripple, somewhere else in the cell
+    float flash = sin(fract(phase) * WATER_PI);
+    flash *= flash; flash *= flash;                           // brief: sin^4
+    vec2 d = f - (0.25 + 0.5 * r);
+    return exp(-dot(d, d) * 40.0) * flash * 33.95 / max(pr, 0.04);   // 33.95 = 40 * 8 / (3 pi): mean 1 over the cell and time
+                                                                    // (rare glints far out in the tail are kept dimmer than physics says, so they do not flare)
+}
+
+float waterGlints(vec2 p, float footprint, float time, float chance) {
+    float w2 = clamp(0.3 / footprint - 0.5, 0.0, 1.0);       // 20 cm sites, out to ~100 m
+    if (w2 <= 0.0 || chance <= 1e-4) return 1.0;
+    float w1 = clamp(0.05 / footprint - 0.5, 0.0, 1.0);      // 3.5 cm sites close by
+    float s = mix(1.0, waterGlintSites(p, 0.2, time, chance), w2);
+    if (w1 > 0.0) s = mix(s, waterGlintSites(p + 3.1, 0.035, time * 1.3, chance), w1);
+    return s;
+}
+
 // Foam lace: the walls between the bubbles and holes of a foam sheet. 1 on a wall, falling
 // to 0 in the middle of a hole and spread fairly evenly in between, so a threshold on it
 // picks out thin threads (high threshold), a sheet with holes (middle) or nearly solid foam
-// (low). Cells of two sizes (20-30 cm, with the mix and the wall thickness changing from
-// place to place) give the bubble walls; blobs of noise of every size from 40 cm down
-// give holes of every size and shape, so the walls never tile into a net or a honeycomb;
-// fine 9 cm cells give the smallest bubbles. Returns 0.5, its mean, once the walls are
-// below a pixel.
+// (low). Blobs of noise of every size from 80 cm down give holes of every size and shape
+// and leave old foam as clusters of bubbles rather than threads; cells of two sizes
+// (20-30 cm, with the mix and the wall thickness changing from place to place) give
+// bubble walls, never enough to tile into a net or a honeycomb; fine 9 cm cells give the
+// smallest bubbles. Returns 0.5, its mean, once everything is below a pixel.
 float waterFoamLace(vec2 q, float footprint) {
-    float w1 = clamp(0.055 / footprint - 0.5, 0.0, 1.0);                  // fades out before the walls get thinner than a pixel
-    if (w1 <= 0.0) return 0.5;
+    // holes of every size and shape, from 80 cm down: each octave fades out by itself once it
+    // is smaller than a pixel, so the big holes still show from high above
+    float blobs = 0.5 + 0.55 * (waterFoamFbm(q + 23.0, footprint, 1.2) - 0.5);
+    float w1 = clamp(0.055 / footprint - 0.5, 0.0, 1.0);                  // the walls fade out before they get thinner than a pixel
+    if (w1 <= 0.0) return blobs;
     vec2 bend = vec2(waterNoise(q * 1.3 + 4.0), waterNoise(q * 1.3 + 19.0)) - 0.5;
     bend += (vec2(waterNoise(q * 3.1 + 11.0), waterNoise(q * 3.1 + 23.0)) - 0.5) * 0.5;
     float big = smoothstep(0.3, 0.7, waterNoise(q * 0.45 + 51.0));        // larger bubbles in some places, smaller in others
@@ -196,14 +247,13 @@ float waterFoamLace(vec2 q, float footprint) {
     vec2 ca = waterCells(q * 3.2 + bend * 0.8);
     vec2 cb = waterCells(q * 5.5 + bend * 1.1 + 17.0);
     float l1 = mix(1.0 - smoothstep(0.0, tw * 0.9, cb.y - cb.x), 1.0 - smoothstep(0.0, tw, ca.y - ca.x), big);
-    float blobs = waterFoamFbm(q + 23.0, footprint, 2.5);                 // holes of every size and shape
     float w2 = clamp(0.018 / footprint - 0.5, 0.0, 1.0);
     float l2 = 0.5;
     if (w2 > 0.0) {
         vec2 c2 = waterCells(q * 11.0 + bend * 1.6 + 31.0);
         l2 = mix(0.5, 1.0 - smoothstep(0.0, 0.5, c2.y - c2.x), w2);
     }
-    return mix(0.5, 0.35 * l1 + 0.45 * blobs + 0.2 * l2, w1);
+    return blobs + w1 * (0.25 * (l1 - 0.5) + 0.2 * (l2 - 0.5));
 }
 
 // A layer of foam: how much it covers, how much light its own surface catches, and how far
@@ -233,7 +283,7 @@ WaterFoam waterFoamLayer(vec2 p, vec2 windDir, float density, float streak, floa
     vec2 side = vec2(-windDir.y, windDir.x);
     vec2 q = vec2(dot(p, windDir) * 0.55, dot(p, side));                       // drawn out along the wind
     vec2 warp = vec2(waterFoamFbm(q + 5.2, footprint, 0.16), waterFoamFbm(q + 41.3, footprint, 0.16)) - 0.5;
-    q += warp * 2.2;                                                           // organic, not grid-like
+    q += warp * 1.6;                                                           // organic, not grid-like, not swirled
     float n = waterFoamFbm(q, footprint, 0.5);                                 // patches, 2 m down to 20 cm
     float C = smoothstep(0.0, 0.65, d);                                        // how full the sheet is, on average
     float fill = clamp(C + (n - 0.5) * 1.3, 0.0, 1.0);                         // ... and here
@@ -243,14 +293,14 @@ WaterFoam waterFoamLayer(vec2 p, vec2 windDir, float density, float streak, floa
     float sharp = min(0.1 + 2.5 * footprint, 0.5);                             // soft bubble edges, never stair-stepped
     float cover = smoothstep(1.0 - fill - sharp, 1.0 - fill + sharp, lace);
     cover = mix(fill * 0.3, 1.0, cover);                                       // a veil of finer bubbles in the holes
-    cover = mix(cover, fill * (1.3 - 0.3 * fill), smoothstep(0.035, 0.11, footprint));   // bubbles too small to see: just how full
+    cover = mix(cover, fill * (1.3 - 0.3 * fill), smoothstep(0.3, 0.8, footprint));     // even the big holes too small to see: just how full
     cover = mix(cover, C * (1.3 - 0.3 * C), smoothstep(0.6, 3.0, footprint));             // far away, only the average is left
     // even thick foam is not flat white: it is thicker in clumps and in lines drawn out along the
     // flow, thinner between them, where the water shows through, and its hollows are darker
-    float lines = mix(0.5, waterNoise(q * vec2(0.9, 5.0) + 61.0), clamp(0.05 / footprint - 0.5, 0.0, 1.0));
-    float body = smoothstep(0.2, 0.8, grain * 0.6 + lines * 0.4);
+    float lines = mix(0.5, waterNoise(q * vec2(1.6, 4.0) + 61.0), clamp(0.05 / footprint - 0.5, 0.0, 1.0));
+    float body = smoothstep(0.2, 0.8, grain * 0.75 + lines * 0.25);
     f.cover = cover * mix(0.5, 1.0, fill) * mix(0.62, 1.0, body);              // thin foam lets the water show through
-    f.shade = mix(0.8, 1.08, grain) * mix(0.88, 1.06, lines);
+    f.shade = mix(0.8, 1.08, grain) * mix(0.93, 1.04, lines);
     f.height = (cover * 0.5 + body * 0.5) * 0.06 * (1.0 - smoothstep(0.05, 0.4, footprint));
     return f;
 }

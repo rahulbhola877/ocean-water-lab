@@ -2844,14 +2844,14 @@
     { scene: 'night', dur: 9, caption: ['Moonlit', 'Bioluminescent wake'], cam: { follow: true, yaw: [0.4, -0.5], dist: [14, 19], pitch: 0.12 } },
     { scene: 'golden', dur: 7, title: ['OPEN SOURCE', 'github.com/rahulbhola877/ocean-water-lab'], end: true, cam: { from: [-40, 15, 0.2, 0.05, 34], to: [-40, 15, 0.42, 0.14, 48] } }
   ];
-  // what changed in 1.8 and 1.9: foam, spray and the look up close (the "What's new" film)
+  // what changed in 1.10: a more natural sea (the "What's new" film)
   var TOUR_NEW = [
-    { scene: 'tropical', dur: 3.5, title: ['OCEAN WATER LAB 1.9', 'A more natural sea, up close'], cam: { from: [-80, 22, 0.05, 0.1, 30], to: [-80, 22, 0.25, 0.13, 25] } },
-    { scene: 'surfbeach', dur: 5, caption: ['Foam that looks like foam', 'A sheet of bubbles that comes apart into lace as it ages'], cam: { from: [-70, 19, 0.25, 0.1, 19], to: [-71, 20, 0.42, 0.14, 14.5] } },
-    { scene: 'storm', dur: 4.5, caption: ['Storm sea', 'Fresh whitecaps, old lace and wind streaks'], cam: { from: [60, -60, 2.85, 0.12, 13], to: [60, -60, 3.1, 0.16, 10] } },
-    { scene: 'storm', dur: 3.5, caption: ['From above', 'Every age of foam, from a breaking crest to a streak'], cam: { from: [60, -60, 3.0, 1.28, 42], to: [60, -60, 3.2, 1.14, 35] } },
-    { scene: 'deep', dur: 4.5, caption: ['Wakes and spray', 'Spray thrown as clouds of drops, not cotton balls'], cam: { follow: true, yaw: [0.8, 1.35], dist: [15, 11.5], pitch: 0.28 } },
-    { scene: 'hurricane', dur: 4.5, caption: ['Hurricane', 'Streaks crowd together until the sea turns white'], strikes: [3.0], cam: { from: [60, -60, 2.5, 0.16, 15], to: [60, -60, 2.75, 0.2, 11.5] } },
+    { scene: 'glass', dur: 3.5, title: ['OCEAN WATER LAB 1.10', 'A more natural sea'], cam: { from: [-20, 30, -1.3, 0.05, 30], to: [-20, 30, -1.14, 0.07, 25] } },
+    { scene: 'golden', dur: 5, caption: ['Sun glitter that flashes', 'Single ripples catching the sun, dense in the glitter path'], cam: { from: [-40, 15, 0.22, 0.05, 26], to: [-40, 15, 0.34, 0.07, 20] } },
+    { scene: 'pirate', dur: 4.5, caption: ['Bubbles under the foam', 'Whitecaps sit in pale green water, as at sea'], cam: { from: [40, -40, 2.3, 0.12, 30], to: [40, -40, 2.6, 0.15, 22] } },
+    { scene: 'tropical', dur: 4.5, caption: ['Natural water colours', 'Turquoise over shallow sand, deep blue beyond'], cam: { from: [-80, 22, 0.05, 0.1, 30], to: [-80, 22, 0.25, 0.13, 25] } },
+    { scene: 'storm', dur: 4.5, caption: ['Storm sea', 'Slate-green water, foam lace and wind streaks'], cam: { from: [60, -60, 2.85, 0.12, 13], to: [60, -60, 3.1, 0.16, 10] } },
+    { scene: 'night', dur: 4, caption: ['Moonlight', 'The moon path flashes too'], cam: { from: [-30, 10, 0.45, 0.08, 26], to: [-30, 10, 0.6, 0.1, 20] } },
     { scene: 'golden', dur: 3.5, title: ['OPEN SOURCE', 'github.com/rahulbhola877/ocean-water-lab'], end: true, cam: { from: [-40, 15, 0.2, 0.05, 34], to: [-40, 15, 0.4, 0.13, 46] } }
   ];
   var TOUR_REEL = TOUR, tourName = 'reel';

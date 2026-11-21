@@ -133,50 +133,51 @@
     ocean: { absR: 0.42, absG: 0.085, absB: 0.05, scatterCol: '#0e62ff', scatterAmt: 0.03, sssCol: '#05574c', sss: 1.0 },
     lagoon: { absR: 0.32, absG: 0.055, absB: 0.045, scatterCol: '#0ec8ff', scatterAmt: 0.07, sssCol: '#0fccad', sss: 1.1 },
     coast: { absR: 0.5, absG: 0.12, absB: 0.11, scatterCol: '#2cb6c8', scatterAmt: 0.03, sssCol: '#2a9f9a', sss: 0.8 },   // clear blue-green: green water under a low orange sun reads as mud
-    tropical: { absR: 0.30, absG: 0.042, absB: 0.035, scatterCol: '#14dcff', scatterAmt: 0.085, sssCol: '#1ae6c8', sss: 1.35 },
-    emerald: { absR: 0.50, absG: 0.11, absB: 0.16, scatterCol: '#2aff9a', scatterAmt: 0.05, sssCol: '#3cff9e', sss: 2.2 },
+    tropical: { absR: 0.30, absG: 0.042, absB: 0.02, scatterCol: '#0b76d6', scatterAmt: 0.05, sssCol: '#1ae6c8', sss: 1.35 },   // deep blue; the turquoise comes off the white sand
+    emerald: { absR: 0.50, absG: 0.11, absB: 0.16, scatterCol: '#1f9c86', scatterAmt: 0.04, sssCol: '#3cff9e', sss: 2.2 },     // slate green-teal, as a sea with plankton in it looks
     navy: { absR: 0.46, absG: 0.11, absB: 0.06, scatterCol: '#0a3cff', scatterAmt: 0.02, sssCol: '#0a4a66', sss: 0.8 },
-    surfwater: { absR: 0.34, absG: 0.05, absB: 0.06, scatterCol: '#1ec8d8', scatterAmt: 0.05, sssCol: '#28e0b4', sss: 1.5 }
+    surfwater: { absR: 0.34, absG: 0.05, absB: 0.05, scatterCol: '#0d86d0', scatterAmt: 0.045, sssCol: '#28e0b4', sss: 1.5 }
   };
 
-  // Scene looks. Names describe the look; the comments say which kind of game
-  // each is tuned after. Every scene starts from the defaults, so a scene only
+  // Scene looks. Water colours follow how sea water absorbs and scatters light: deep
+  // water is blue or slate green, turquoise comes off a shallow, light sea bed. Every
+  // scene starts from the defaults, so a scene only
   // lists what differs. 'cam' frames the shot: target x, z, yaw, pitch, distance.
   var SCENES = {
-    // turquoise lagoon, white sand, hard noon light, saturated grade (Vice City-style coast)
+    // turquoise lagoon, white sand, hard noon light
     tropical: {
       label: 'Tropical Bay',
       p: { wind: 5.5, windDir: 300, fetch: 120, chop: 0.95, swell: 0.9, swellLen: 140, swellDir: 255, foam: 0.7,
            sunElev: 58, sunAz: 25, clouds: 0.34, cloudType: 0.82, cloudBase: 1300, cloudTop: 3800, haze: 0.3,
            surf: 1.1, surfPeriod: 10, shoreFoam: 1.2, caustics: 1.6, look: 'tropical',
-           temp: 0.08, sat: 1.18, vib: 0.25, contrast: 1.06, bloom: 1.2, ev: -0.35, palms: true, boat: true, autopilot: true },
+           temp: 0.08, sat: 1.05, vib: 0.1, contrast: 1.06, bloom: 1.2, ev: -0.35, slicks: 0.35, palms: true, boat: true, autopilot: true },
       cam: [-80, 22, 0.25, 0.14, 30], boat: [-40, -40, 30]
     },
-    // low sun through haze, warm sky and a long gold glitter path (Los Santos sunset-style)
+    // low sun through haze, warm sky and a long gold glitter path
     golden: {
       label: 'Golden Coast',
       p: { wind: 7, windDir: 200, fetch: 300, chop: 1.0, swell: 1.2, swellLen: 160, swellDir: 220, foam: 0.9,
            sunElev: 3.5, sunAz: 196, clouds: 0.3, cloudType: 0.45, cloudBase: 1900, cloudTop: 4200, haze: 2.2, fog: 1.6,
            surf: 0.9, look: 'coast', spec: 1.4,
-           temp: 0.22, tint: 0.04, sat: 1.12, contrast: 1.08, bloom: 1.8, split: 0.35, shadowTint: '#5a6f8c', highTint: '#ffb070',
-           palms: true, boat: true, autopilot: true },
+           temp: 0.16, tint: 0.04, sat: 1.04, contrast: 1.08, bloom: 1.8, split: 0.28, shadowTint: '#5a6f8c', highTint: '#ffb070',
+           slicks: 0.3, palms: true, boat: true, autopilot: true },
       cam: [-40, 15, 0.28, 0.06, 30], boat: [-30, -5, 25]
     },
-    // sailing a brig across a lively sea in the afternoon (pirate-adventure sailing)
+    // sailing a brig across a lively sea in the afternoon
     pirate: {
       label: 'Pirate Seas',
       p: { wind: 11, windDir: 250, fetch: 400, chop: 1.08, swell: 1.6, swellLen: 150, swellDir: 240, foam: 1.1,
            sunElev: 24, sunAz: 120, clouds: 0.45, cloudType: 0.8, cloudBase: 1300, cloudTop: 4200, haze: 0.6, look: 'emerald', sss: 1.9,
-           sat: 1.12, vib: 0.2, contrast: 1.08, bloom: 1.2, vessel: 'ship', boat: true, autopilot: true, throttle: 1, palms: true },
+           sat: 1.03, vib: 0.08, contrast: 1.08, bloom: 1.2, vessel: 'ship', boat: true, autopilot: true, throttle: 1, palms: true },
       cam: [40, -40, 2.4, 0.1, 44], boat: [40, -40, 40]
     },
-    // big clear-water surf rolling in over a reef at high tide, foam torn into long streaks (Los Santos beach-style)
+    // big clear-water surf rolling in over a reef at high tide, foam drawn out behind the breakers
     surfbeach: {
       label: 'Big Surf',
       p: { wind: 6, windDir: 330, fetch: 200, chop: 1.0, swell: 1.4, swellLen: 180, swellDir: 340, foam: 0.8,
            sunElev: 52, sunAz: 40, clouds: 0.2, cloudType: 0.7, haze: 0.4, look: 'surfwater',
-           tide: 0.6, surf: 2.4, surfPeriod: 9.5, breakRatio: 0.8, shoreFoam: 1.4, surfTrail: 0.5, surfStreaks: 0.75, foamScale: 1.0, foamLinger: 0.4,
-           caustics: 1.8, sat: 1.1, vib: 0.2, contrast: 1.05, ev: -0.25, palms: true, boat: false },
+           tide: 0.6, surf: 2.4, surfPeriod: 9.5, breakRatio: 0.8, shoreFoam: 1.4, surfTrail: 0.5, surfStreaks: 0.6, foamScale: 1.0, foamLinger: 0.4,
+           caustics: 1.8, sat: 1.03, vib: 0.08, contrast: 1.05, ev: -0.25, palms: true, boat: false },
       cam: [-70, 19, 0.32, 0.95, 42]
     },
     // category-4 storm: torrential rain, gust fronts, spindrift, lightning and rogue waves
@@ -190,7 +191,7 @@
            split: 0.18, shadowTint: '#3e5a66', highTint: '#9aa49c', palms: false, boat: true, vessel: 'speedboat', autopilot: true },
       cam: [60, -60, 2.6, 0.13, 42], boat: [80, -60, 40]
     },
-    // gale, huge swell, rain, lightning, green light through the crests (pirate-adventure storm)
+    // gale, huge swell, rain, lightning, green light through the crests
     storm: {
       label: 'Pirate Storm',
       p: { wind: 19, windDir: 60, fetch: 600, gamma: 3.8, chop: 1.18, swell: 3.0, swellLen: 200, swellDir: 70, foam: 1.0,
@@ -200,12 +201,12 @@
            palms: false, boat: true, vessel: 'ship', autopilot: true },
       cam: [60, -60, 3.0, 0.06, 34], boat: [80, -60, 40]
     },
-    // deep clear navy water, scattered fair-weather cumulus (open-sea adventure)
+    // deep clear navy water, scattered fair-weather cumulus
     deep: {
       label: 'Deep Ocean',
       p: { wind: 12, windDir: 20, fetch: 700, chop: 1.08, swell: 1.8, swellLen: 180, swellDir: 50, foam: 1.1,
            sunElev: 42, sunAz: 150, clouds: 0.28, cloudType: 0.7, cloudBase: 1400, cloudTop: 3600, look: 'navy',
-           spec: 1.0, contrast: 1.05, sat: 1.08, palms: false, boat: true, autopilot: true },
+           spec: 1.0, contrast: 1.05, sat: 1.03, palms: false, boat: true, autopilot: true },
       cam: [150, -150, -2.09, 0.12, 22], boat: [170, -115, 30]
     },
     // moon path on a slow swell, stars, cool grade
@@ -216,13 +217,13 @@
            vignette: 0.5, ev: -0.6, bio: 1.3, throttle: 0.6, palms: true, boat: true, autopilot: true },
       cam: [-30, 10, 0.52, 0.1, 24], boat: [-50, -15, 26]
     },
-    // dawn calm: a near mirror with pink haze (open-world lake/sea at dawn)
+    // dawn calm: a near mirror with pink haze
     glass: {
       label: 'Glass Calm',
       p: { wind: 1.4, windDir: 140, fetch: 20, chop: 0.6, swell: 0.25, swellLen: 80, foam: 0, sunElev: 6, sunAz: 110,
            clouds: 0.22, cloudType: 0.3, cloudBase: 2200, cloudTop: 3600, haze: 3.2, fog: 2.2, surf: 0.3, look: 'ocean',
            temp: 0.05, tint: 0.1, sat: 0.95, contrast: 0.96, bloom: 1.4, split: 0.25, shadowTint: '#6a6a9a', highTint: '#ffc2a8',
-           palms: true, boat: false },
+           slicks: 0.5, palms: true, boat: false },
       cam: [-20, 30, -1.22, 0.05, 28], boat: [0, 20, 40]
     }
   };

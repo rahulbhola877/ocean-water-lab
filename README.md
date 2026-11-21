@@ -53,6 +53,9 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 **Light**
 - A physical sky (Hillaire 2020) with volumetric clouds and their shadows.
 - Planar reflections, refraction with depth absorption, light through crests, caustics.
+- Sun glitter that breaks into single flashing ripples close up, dense in the glitter path and thinning to stray sparkles around it.
+- Bubble clouds under whitecaps and breakers that light the water around them pale turquoise or green.
+- Water colours from how sea water absorbs and scatters light: deep water blue or slate green, turquoise only over a shallow, light sea bed.
 - Sun shadow maps, underwater light shafts.
 - Grade: tone curves (ACES, AgX, filmic, Reinhard), white balance, split toning, grain, FXAA.
 
