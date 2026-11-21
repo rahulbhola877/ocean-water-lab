@@ -4877,9 +4877,13 @@ window.WATER_SHADERS = {"foam_sim.frag":"#ifndef WATER_FOAM_DEPTH\n#define WATER
     var fade = 1 - tour.fade, disp = '"Saira Condensed", "Arial Narrow", Arial, sans-serif';
     c.save(); c.globalAlpha = fade;
     if (cap.big) {
+      var by = H * 0.44 - 110 * u, bh = 200 * u, g = c.createLinearGradient(0, by, 0, by + bh);   // a soft dark band, so it reads over sand, sun or sky
+      g.addColorStop(0, 'rgba(4, 12, 20, 0)'); g.addColorStop(0.5, 'rgba(4, 12, 20, 0.5)'); g.addColorStop(1, 'rgba(4, 12, 20, 0)');
+      c.fillStyle = g; c.fillRect(0, by, W, bh);
+      c.shadowColor = 'rgba(0, 0, 0, 0.65)'; c.shadowBlur = 12 * u; c.shadowOffsetY = 2 * u;
       c.textAlign = 'center'; c.fillStyle = '#e8f1f4';
       c.font = '600 ' + Math.round(86 * u) + 'px ' + disp; c.fillText(cap.a.split('').join(String.fromCharCode(8202)), W / 2, H * 0.44);
-      c.fillStyle = '#ffb84d'; c.font = '500 ' + Math.round(34 * u) + 'px ' + disp; c.fillText(cap.b, W / 2, H * 0.44 + 56 * u);
+      c.fillStyle = '#ffd59a'; c.font = '500 ' + Math.round(34 * u) + 'px ' + disp; c.fillText(cap.b, W / 2, H * 0.44 + 56 * u);
     } else {
       c.fillStyle = 'rgba(6, 18, 29, 0.62)';
       c.font = '600 ' + Math.round(40 * u) + 'px ' + disp;

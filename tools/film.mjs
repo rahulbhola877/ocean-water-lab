@@ -18,12 +18,13 @@ page.on('console', (m) => { if (m.type() === 'error') logs.push(m.text()); });
 const hash = process.env.QUALITY === 'low' ? '#test' : '#test-high';            // QUALITY=low: smaller FFT and simulations, much faster on a software GPU
 await page.goto(pathToFileURL(join(root, 'demo', 'dist', 'index.html')).href + hash + (which === 'new' ? '&whatsnew' : ''), { waitUntil: 'load' });
 await page.waitForFunction(() => document.body.classList.contains('ready') || document.body.classList.contains('failed'), null, { timeout: 300000 });
-// quick tests: SHOTS=2 keeps the first two shots, TRIM=1 cuts every shot to 1 s
-await page.evaluate(([n, trim]) => {
+// quick tests and re-takes: SHOTS=2 keeps the first two shots, PICK=0,6 keeps just those, TRIM=1 cuts every shot to 1 s
+await page.evaluate(([n, pick, trim]) => {
   const T = window.OceanLab.TOUR;
+  if (pick) { const keep = pick.split(',').map((i) => T[+i]); T.splice(0, T.length, ...keep); }
   if (n) T.splice(+n);
   if (trim) T.forEach((s) => { s.dur = Math.min(s.dur, +trim); });
-}, [process.env.SHOTS || 0, process.env.TRIM || 0]);
+}, [process.env.SHOTS || 0, process.env.PICK || '', process.env.TRIM || 0]);
 const download = page.waitForEvent('download', { timeout: 0 });
 const t0 = Date.now();
 await page.evaluate(([w, h, fps]) => { window.OceanLab.renderFilm(w, h, fps); }, [+w, +h, +fps]);
