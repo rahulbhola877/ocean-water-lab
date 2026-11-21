@@ -4,9 +4,9 @@
 
 ![Golden Coast with the advanced panel open](media/golden-coast-panel.jpg)
 
-**Videos:** [what's new in 1.8 and 1.9](media/whats-new-1.9.mp4) (foam, spray and the look up close, 29 s, with sound), [what's new in 1.5](media/ocean-lab-whats-new.mp4) (50 s, with sound), [Water Lite, live demo](media/water-lite-demo.mp4) (74 s) and [a grenade thrown in](media/throws-grenade.mp4) (new in 1.7, 9 s, with sound). The 1.5 film and the Water Lite demo were rendered on an ordinary laptop GPU; the 1.9 film and the grenade in software, at 960×540.
+**Videos:** [what's new in 1.10](media/whats-new-1.10.mp4) (a more natural sea: flashing glitter, bubbles under the foam, natural colours, 30 s, with sound), [what's new in 1.8 and 1.9](media/whats-new-1.9.mp4) (foam, spray and the look up close, 29 s, with sound), [what's new in 1.5](media/ocean-lab-whats-new.mp4) (50 s, with sound), [Water Lite, live demo](media/water-lite-demo.mp4) (74 s) and [a grenade thrown in](media/throws-grenade.mp4) (new in 1.7, 9 s, with sound). The 1.5 film and the Water Lite demo were rendered on an ordinary laptop GPU; the 1.9 and 1.10 films and the grenade in software, at 960×540.
 
-[![What's new in Ocean Water Lab 1.9: foam that looks like foam, storm sea, wakes and spray, hurricane](media/whats-new-1.9.jpg)](media/whats-new-1.9.mp4)
+[![What's new in Ocean Water Lab 1.10: flashing sun glitter, bubbles under the foam, natural water colours, storm sea, moonlight](media/whats-new-1.10.jpg)](media/whats-new-1.10.mp4)
 
 | | | |
 |---|---|---|
