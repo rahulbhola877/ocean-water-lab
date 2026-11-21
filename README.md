@@ -43,7 +43,9 @@ Download or clone this repo, then open `demo/dist/index.html` in Chrome, Edge, F
 - Tides: a level, plus a swing and period.
 
 **Foam**
-- Foam drawn as a sheet of bubbles: nearly solid where a crest has just broken, coming apart into lace and loose threads at its edges and as it ages. Filtered by distance, so it never shimmers.
+- Foam drawn as a sheet of bubbles: nearly solid where a crest has just broken, coming apart into lace and loose threads at its edges and as it ages. Holes of every size, so it never reads as a net. Filtered by distance, so it never shimmers.
+- Thick foam is lumpy and streaked along the flow, thinner between its clumps where the water shows through, and lit with its own relief.
+- Spray drawn as clouds of drops that streak in motion, not solid balls.
 - Whitecaps calibrated against measured wind coverage.
 - Persistent foam trails, plus a separate long-lived wake channel.
 - Wind streaks, Kelvin wake arms behind boats, and Langmuir slicks (glassy lanes along the wind).

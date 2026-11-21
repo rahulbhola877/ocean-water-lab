@@ -41,7 +41,8 @@ void main() {
 //@@ spray.vert
 // Spray, splashes and wake mist: CPU particles drawn as lumpy, lit clumps of white water
 // (ragged edges from noise, shaded as a rough ball under the sun and sky), stretched into
-// streaks along their motion like drops seen in a short exposure.
+// streaks along their motion like drops seen in a short exposure. Large clumps are clouds
+// of drops rather than solid balls: thinner, speckled, lit through.
 layout(location = 0) in vec2 aCorner;   // -1..1
 layout(location = 1) in vec4 aPosSize;  // per instance: world position, radius
 layout(location = 2) in float aAlpha;
@@ -50,10 +51,11 @@ uniform mat4 uViewProj;
 uniform vec3 uCamRight, uCamUp;
 uniform float uEnvMaxLod;
 uniform float uShutter;                 // a drop is drawn as the streak it makes in this time
+uniform float uUnderwater;
 out vec2 vQ;
 out float vA;
 flat out vec3 vAcross, vAlong, vView, vAmb;
-flat out float vSeed, vSmoke, vStreak;
+flat out float vSeed, vSmoke, vStreak, vBig;
 void main() {
     vec3 Vd = normalize(uCamPos - aPosSize.xyz);
     vec3 m = aVel * uShutter;
@@ -68,6 +70,8 @@ void main() {
     vA = abs(aAlpha) * mix(1.0, r / half_, 0.6);                        // the same water spread over a longer streak
     float camD = length(uCamPos - aPosSize.xyz);
     vA *= smoothstep(0.6, 2.0, camD / max(r, 0.05)) * smoothstep(0.4, 1.6, camD);   // nothing smeared across the lens
+    vA *= 1.0 - 0.9 * uUnderwater * smoothstep(-0.3, 0.5, aPosSize.y);  // from under the sea, spray in the air is hidden by the surface
+    vBig = smoothstep(0.12, 0.7, r);
     vSmoke = step(aAlpha, 0.0);                                         // negative alpha: grey gun smoke
     vSeed = fract(sin(float(gl_InstanceID) * 12.9898 + 1.7) * 43758.5453);
     vStreak = clamp(len / max(half_, 1e-4), 0.0, 1.0);
@@ -79,7 +83,7 @@ void main() {
 in vec2 vQ;
 in float vA;
 flat in vec3 vAcross, vAlong, vView, vAmb;
-flat in float vSeed, vSmoke, vStreak;
+flat in float vSeed, vSmoke, vStreak, vBig;
 out vec4 fragColor;
 void main() {
     float r2 = dot(vQ, vQ);
@@ -88,13 +92,16 @@ void main() {
     float nz = 0.62 * vnoise(vQ * 2.2 + o) + 0.38 * vnoise(vQ * 5.3 - o);
     float lump = mix(0.55, 0.25, vStreak);                              // streaks stay smooth, clumps break up
     float dens = (1.0 - r2) * 1.3 + (nz - 0.5) * 2.0 * lump;
+    float big = vBig * (1.0 - vSmoke);
+    dens += (vnoise(vQ * 9.0 + o * 1.7) - 0.5) * 1.2 * big;             // a big clump is a cloud of drops: speckled
     if (dens <= 0.0) discard;
-    float a = smoothstep(0.0, 0.5, dens) * min(vA, 1.0);
+    float a = smoothstep(0.0, mix(0.5, 1.1, big), dens) * min(vA, 1.0) * mix(1.0, 0.6, big);
     // shaded as a rough white ball: a lit top, a darker underside, light through its thin edges
     float z = sqrt(max(1.0 - r2, 0.0));
     vec3 N = normalize(vAcross * vQ.x + vAlong * vQ.y + vView * (z + 0.15) + (vec3(nz) - 0.5) * 0.7);
+    N = normalize(mix(N, vView, big * 0.5));                            // light scatters through a cloud of drops; it is not a ball
     float sunLit = max(dot(N, uSunDir), 0.0);
-    float back = pow(max(dot(-vView, uSunDir), 0.0), 5.0) * (1.0 - smoothstep(0.2, 0.9, dens));
+    float back = pow(max(dot(-vView, uSunDir), 0.0), 5.0) * (1.0 - smoothstep(0.2, 0.9, dens)) * (1.0 + 0.35 * big);
     float alb = mix(0.78, 0.3, vSmoke);
     vec3 col = alb * (uSunColor * (sunLit * 0.85 + 0.12) / PI + vAmb * (0.55 + 0.45 * clamp(N.y * 0.5 + 0.5, 0.0, 1.0))) + uSunColor * back * 0.25;
     fragColor = vec4(encodeHDR(col) * a, a);

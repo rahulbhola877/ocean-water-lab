@@ -132,7 +132,7 @@
   var LOOKS = {
     ocean: { absR: 0.42, absG: 0.085, absB: 0.05, scatterCol: '#0e62ff', scatterAmt: 0.03, sssCol: '#05574c', sss: 1.0 },
     lagoon: { absR: 0.32, absG: 0.055, absB: 0.045, scatterCol: '#0ec8ff', scatterAmt: 0.07, sssCol: '#0fccad', sss: 1.1 },
-    coast: { absR: 0.55, absG: 0.22, absB: 0.38, scatterCol: '#66ff99', scatterAmt: 0.04, sssCol: '#33993d', sss: 0.8 },
+    coast: { absR: 0.5, absG: 0.12, absB: 0.11, scatterCol: '#2cb6c8', scatterAmt: 0.03, sssCol: '#2a9f9a', sss: 0.8 },   // clear blue-green: green water under a low orange sun reads as mud
     tropical: { absR: 0.30, absG: 0.042, absB: 0.035, scatterCol: '#14dcff', scatterAmt: 0.085, sssCol: '#1ae6c8', sss: 1.35 },
     emerald: { absR: 0.50, absG: 0.11, absB: 0.16, scatterCol: '#2aff9a', scatterAmt: 0.05, sssCol: '#3cff9e', sss: 2.2 },
     navy: { absR: 0.46, absG: 0.11, absB: 0.06, scatterCol: '#0a3cff', scatterAmt: 0.02, sssCol: '#0a4a66', sss: 0.8 },

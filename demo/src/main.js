@@ -2844,15 +2844,15 @@
     { scene: 'night', dur: 9, caption: ['Moonlit', 'Bioluminescent wake'], cam: { follow: true, yaw: [0.4, -0.5], dist: [14, 19], pitch: 0.12 } },
     { scene: 'golden', dur: 7, title: ['OPEN SOURCE', 'github.com/rahulbhola877/ocean-water-lab'], end: true, cam: { from: [-40, 15, 0.2, 0.05, 34], to: [-40, 15, 0.42, 0.14, 48] } }
   ];
-  // what changed in 1.5: physics and storms (the "What's new" film)
+  // what changed in 1.8 and 1.9: foam, spray and the look up close (the "What's new" film)
   var TOUR_NEW = [
-    { scene: 'hurricane', dur: 5, title: ['OCEAN WATER LAB 1.5', 'Physics and storms, rebuilt'], cam: { from: [60, -60, 2.5, 0.08, 46], to: [60, -60, 2.8, 0.12, 38] } },
-    { scene: 'hurricane', dur: 9, caption: ['Breaking crests', 'Their roller throws the speedboat about, and a rogue wave can roll her over'], rogue: 0.72, cam: { follow: true, yaw: [0.9, 1.6], dist: [28, 22], pitch: 0.55 } },   // high enough to see over the crests
-    { scene: 'hurricane', dur: 7.5, caption: ['Capsize and righting', 'Turned over, she floods and stays over until you press R (or her crew rights her)'], capsize: 0.4, right: 4.2, cam: { follow: true, yaw: [1.7, 2.3], dist: [17, 14], pitch: 0.42 } },
-    { scene: 'hurricane', dur: 7, caption: ['Lightning that lights the storm', 'Clouds glow around the strike and the sea catches it: no white-out, no wet lens'], strikes: [1.1, 3.6, 5.5], cam: { from: [60, -60, 2.9, 0.1, 40], to: [60, -60, 3.15, 0.14, 33] } },
-    { scene: 'storm', dur: 9, caption: ['Storm sea', 'Teal light through the crests, foam lace and wind streaks; the ship reefs in a blow'], cam: { follow: true, yaw: [2.4, 1.5], dist: [46, 34], pitch: 0.1 } },
-    { scene: 'tropical', dur: 7, caption: ['Wind drift and currents', 'Flotsam drifts downwind, and a current carries everything with it'], current: 1.6, reset: true, cam: { from: [-1, 1, 1.15, 0.62, 19], to: [2, 4, 1.4, 0.55, 17] } },
-    { scene: 'golden', dur: 5, title: ['OPEN SOURCE', 'github.com/rahulbhola877/ocean-water-lab'], end: true, cam: { from: [-40, 15, 0.2, 0.05, 34], to: [-40, 15, 0.42, 0.14, 48] } }
+    { scene: 'tropical', dur: 3.5, title: ['OCEAN WATER LAB 1.9', 'A more natural sea, up close'], cam: { from: [-80, 22, 0.05, 0.1, 30], to: [-80, 22, 0.25, 0.13, 25] } },
+    { scene: 'surfbeach', dur: 5, caption: ['Foam that looks like foam', 'A sheet of bubbles that comes apart into lace as it ages'], cam: { from: [-70, 19, 0.25, 0.1, 19], to: [-71, 20, 0.42, 0.14, 14.5] } },
+    { scene: 'storm', dur: 4.5, caption: ['Storm sea', 'Fresh whitecaps, old lace and wind streaks'], cam: { from: [60, -60, 2.85, 0.12, 13], to: [60, -60, 3.1, 0.16, 10] } },
+    { scene: 'storm', dur: 3.5, caption: ['From above', 'Every age of foam, from a breaking crest to a streak'], cam: { from: [60, -60, 3.0, 1.28, 42], to: [60, -60, 3.2, 1.14, 35] } },
+    { scene: 'deep', dur: 4.5, caption: ['Wakes and spray', 'Spray thrown as clouds of drops, not cotton balls'], cam: { follow: true, yaw: [0.8, 1.35], dist: [15, 11.5], pitch: 0.28 } },
+    { scene: 'hurricane', dur: 4.5, caption: ['Hurricane', 'Streaks crowd together until the sea turns white'], strikes: [3.0], cam: { from: [60, -60, 2.5, 0.16, 15], to: [60, -60, 2.75, 0.2, 11.5] } },
+    { scene: 'golden', dur: 3.5, title: ['OPEN SOURCE', 'github.com/rahulbhola877/ocean-water-lab'], end: true, cam: { from: [-40, 15, 0.2, 0.05, 34], to: [-40, 15, 0.4, 0.13, 46] } }
   ];
   var TOUR_REEL = TOUR, tourName = 'reel';
   function useTour(name) { tourName = name === 'new' ? 'new' : 'reel'; TOUR = tourName === 'new' ? TOUR_NEW : TOUR_REEL; }
@@ -2880,6 +2880,10 @@
       qRotate(boat.body.q, [1, 0, 0], bf);
       var sp = boat.body.isShip ? 4 : 12;
       boat.body.vel[0] = bf[0] * sp; boat.body.vel[2] = bf[2] * sp; boat.throttle = boat.body.isShip ? 1 : 0.85;
+    }
+    if (film.on) {                                                     // an offline film: let the foam and spray build up before the shot
+      placeTourCamera(0, true);
+      for (var pr = 0; pr < 45; pr++) { simulate(0.1); placeTourCamera(0, true); prepare(0.1); }
     }
     if (s.rogue) {
       placeTourCamera(0, true);

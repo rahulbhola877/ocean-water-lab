@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.0
+
+A closer look. Every scene was checked up close, low over the water, from above, behind a boat and under the surface, and what did not look natural was fixed.
+
+- **Foam up close.** Near the camera the 1.8 foam showed how it was made: bubbles big enough to read as a net or as marbling, and thick foam as a flat grey sheet. The bubbles are now finer (9-30 cm) and only gently bent, and holes of every size and shape are mixed in, so the lace never tiles. The holes in a sheet keep a veil of finer bubbles. Thick foam is thicker in clumps and in lines along the flow and thinner between them, where the water shows through, and it is lit with its own lumps, so a breaking wave reads as aerated white water instead of paint (kit: `waterFoamLayer` returns a `WaterFoam` with cover, shade and height; `waterShadeFoam` lights foam with a normal from `waterBumpNormal`; GLSL and HLSL).
+- **Spray is clouds of drops.** Big spray (bow spray, rooster tails, slams, blasts) was drawn as solid lumpy balls, like cotton wool. Big clumps are now thinner, speckled with drops and lit through; small drops still streak.
+- **Under the sea, spray in the air stays out of sight** behind the surface, instead of floating in the water as a white cloud.
+- **Golden Coast water is clear blue-green.** Green coastal water under a low orange sun read as mud.
+- **The What's new film shows this release** (Tour, What's new, Render film), and a rendered film now lets the foam build up before each shot, as it would in play.
+- `tools/gallery.mjs` takes a JSON list of named shots with their own cameras, for close-up checks, and `tools/film.mjs` renders the film offline (`QUALITY=low` for a software GPU).
+
 ## 1.8.0
 
 Foam that looks like foam.
